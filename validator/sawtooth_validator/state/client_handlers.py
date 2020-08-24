@@ -190,7 +190,7 @@ class _ClientRequestHandler(Handler, metaclass=abc.ABCMeta):
                 return self._block_store[request.head_id]
             except KeyError as e:
                 LOGGER.debug('Unable to find block "%s" in store', e)
-                raise _ResponseFailed(self._status.NO_ROOT)
+                raise _ResponseFailed(self._status.NO_ROOT) from e
 
         else:
             return self._get_chain_head()
@@ -227,7 +227,7 @@ class _ClientRequestHandler(Handler, metaclass=abc.ABCMeta):
             self._tree.set_merkle_root(root)
         except KeyError as e:
             LOGGER.debug('Unable to find root "%s" in database', e)
-            raise _ResponseFailed(self._status.NO_ROOT)
+            raise _ResponseFailed(self._status.NO_ROOT) from e
 
         return root
 
@@ -373,7 +373,7 @@ class _Pager:
             if start_index < 0 or start_index >= len(resources):
                 raise AssertionError
         except AssertionError:
-            raise _ResponseFailed(on_fail_status)
+            raise _ResponseFailed(on_fail_status) from AssertionError
 
         paged_resources = resources[start_index: start_index + limit]
         if start_index + limit < len(resources):
@@ -522,8 +522,8 @@ class _Sorter:
                 try:
                     resource_a = getattr(resource_a, key)
                     resource_b = getattr(resource_b, key)
-                except AttributeError:
-                    raise _ResponseFailed(self._fail_status)
+                except AttributeError as e:
+                    raise _ResponseFailed(self._fail_status) from e
 
             return resource_a, resource_b
 
