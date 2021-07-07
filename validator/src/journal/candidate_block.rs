@@ -78,6 +78,8 @@ pub struct CandidateBlock {
     pending_batch_ids: HashSet<String>,
     injected_batch_ids: HashSet<String>,
 
+    invalid_batch_ids: HashSet<String>,
+
     committed_txn_cache: TransactionCommitCache,
 }
 
@@ -113,6 +115,7 @@ impl CandidateBlock {
             pending_batches: vec![],
             pending_batch_ids: HashSet::new(),
             injected_batch_ids: HashSet::new(),
+            invalid_batch_ids: HashSet::new(),
         };
         //only call when consensus is Gluwa PoW
         //TODO move string literal to literal space
@@ -474,10 +477,16 @@ impl CandidateBlock {
                     committed_txn_cache.add_batch(&batch.clone());
                 }
             } else {
+                self.invalid_batch_ids.insert(batch.header_signature.clone());
                 bad_batches.push(batch.clone());
                 debug!("Batch {} invalid, not added to block", header_signature);
             }
         }
+
+        if self.injected_batch_ids == valid_batch_ids {
+            return Ok(None);
+        }
+
         if execution_results.ending_state_hash.is_none() || self.no_batches_added(&builder) {
             debug!("Abandoning block, no batches added");
             return Ok(None);
@@ -573,5 +582,13 @@ impl CandidateBlock {
         } else {
             Err(CandidateBlockError::BlockEmpty)
         }
+    }
+
+    pub fn has_invalid_batches(&self) -> bool {
+        return !self.invalid_batch_ids.is_empty();
+    }
+
+    pub fn get_invalid_batch_ids(&self) -> &HashSet<String> {
+        return &self.invalid_batch_ids;
     }
 }
