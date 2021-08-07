@@ -92,6 +92,7 @@ pub struct BlockPublisherState {
     pub batch_observers: Vec<Box<BatchObserver>>,
     pub chain_head: Option<Block>,
     pub candidate_block: Option<CandidateBlock>,
+    pub candidate_block2: Option<CandidateBlock>,
     pub pending_batches: PendingBatchesPool,
     block_references: HashMap<String, BlockRef>,
 }
@@ -109,6 +110,7 @@ impl BlockPublisherState {
             transaction_executor,
             chain_head,
             candidate_block,
+            candidate_block2: None,
             pending_batches,
             block_references: HashMap::new(),
         }
@@ -117,6 +119,17 @@ impl BlockPublisherState {
     pub fn get_previous_block_id(&self) -> Option<String> {
         let candidate_block = self.candidate_block.as_ref();
         candidate_block.map(|cb| cb.previous_block_id())
+    }
+
+    pub fn purge_invalid_txns(&mut self) {
+        if let Some(ref cb) = self.candidate_block {
+            if !cb.has_invalid_batches() {
+                return;
+            }
+            // Removing invalid batches from pending_batches
+            self.pending_batches
+                .remove_matching(cb.get_invalid_batch_ids().iter());
+        }
     }
 }
 
@@ -305,7 +318,7 @@ impl SyncBlockPublisher {
 
         for batch in state.pending_batches.iter() {
             if candidate_block.can_add_batch() {
-                candidate_block.add_batch(batch.clone());
+                candidate_block.add_batch(Some(batch.clone()));
             } else {
                 break;
             }
@@ -381,6 +394,8 @@ impl SyncBlockPublisher {
     }
 
     fn restart_block(&self, state: &mut BlockPublisherState) {
+        state.purge_invalid_txns();
+
         if let Some(previous_block) = state.candidate_block.as_ref().map(|candidate| {
             self.get_block(&candidate.previous_block_id())
                 .expect("Failed to get previous block, but we are building on it.")
@@ -493,7 +508,7 @@ impl SyncBlockPublisher {
                 // If currently building a block, add the batch to it
                 if let Some(ref mut candidate_block) = state.candidate_block {
                     if candidate_block.can_add_batch() {
-                        candidate_block.add_batch(batch);
+                        candidate_block.add_batch(Some(batch));
                     }
                 }
             }
@@ -501,6 +516,8 @@ impl SyncBlockPublisher {
     }
 
     fn cancel_block(&self, state: &mut BlockPublisherState, unref_block: bool) {
+        state.purge_invalid_txns();
+
         let mut candidate_block = None;
         mem::swap(&mut state.candidate_block, &mut candidate_block);
         if let Some(mut candidate_block) = candidate_block {
@@ -795,6 +812,16 @@ impl PendingBatchesPool {
         } else {
             false
         }
+    }
+
+    /// Remove batches matching the provided header signatures
+    pub fn remove_matching<'a>(&mut self, mut ids: impl Iterator<Item = &'a String>) {
+        self.batches.retain(|b| {
+            ids.find(|&header_sig| *header_sig == b.header_signature)
+                .is_none()
+        });
+        self.ids
+            .retain(|id| ids.find(|&header_sig| header_sig == id).is_none());
     }
 
     /// Recomputes the list of pending batches
