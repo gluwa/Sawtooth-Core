@@ -11,6 +11,55 @@ env:
   DISTRO: bionic
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        # needed for `git describe --dirty` when building docker images
+        fetch-depth: 0
+
+    - name: Docker version
+      run: |
+        docker --version
+        docker-compose --version
+
+    - name: Build Lint Requirements
+      run: |
+        docker-compose -f docker/compose/run-lint.yaml build
+
+    - name: Run Lint
+      run: |
+        # Disabled because of CRB-213
+        # docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-python lint-python
+        docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-rust lint-rust
+        docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-validator lint-validator
+
+
+  bandit:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        # needed for `git describe --dirty` when building docker images
+        fetch-depth: 0
+
+    - name: Docker version
+      run: |
+        docker --version
+        docker-compose --version
+
+    - name: Build Test Dependencies
+      run: |
+        docker build -f docker/bandit -t bandit:$ISOLATION_ID .
+
+    - name: Run Bandit
+      run: |
+        docker run --rm -v $(pwd):/project/sawtooth-core bandit:$ISOLATION_ID run_bandit
+
+
   test-sawtooth-core:
     runs-on: ubuntu-latest
 
@@ -28,3 +77,8 @@ jobs:
     - name: Build Test Dependencies
       run: |
         docker-compose -f docker-compose-installed.yaml build
+        # docker-compose -f docker/compose/external.yaml build
+
+    - name: Run Tests
+      run: |
+        INSTALL_TYPE="" ./bin/run_tests -i deployment
