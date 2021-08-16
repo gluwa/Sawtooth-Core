@@ -7,7 +7,6 @@ on:
   pull_request:
 
 env:
-  # TODO: not sure if needed, seems to also work without them
   ISOLATION_ID: ${{ github.run_id }}
   DISTRO: bionic
 
@@ -26,10 +25,32 @@ jobs:
         docker --version
         docker-compose --version
 
-    - name: Build Sawtooth
+    - name: Build Lint Requirements
+      run: |
+        docker-compose -f docker/compose/run-lint.yaml build
+        docker-compose -f docker/compose/sawtooth-build.yaml up
+        docker-compose -f docker/compose/sawtooth-build.yaml down
+
+    - name: Run Lint
+      run: |
+        docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-python lint-python
+        docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-rust lint-rust
+        docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-validator lint-validator
+
+    - name: Build Test Dependencies
       run: |
         docker-compose -f docker-compose-installed.yaml build
+        docker-compose -f docker/compose/external.yaml build
+        docker build -f docker/bandit -t bandit:$ISOLATION_ID .
 
-    - name: Run tests
+    - name: Run Bandit
+      run: |
+        docker run --rm -v $(pwd):/project/sawtooth-core bandit:$ISOLATION_ID run_bandit
+
+#    - name: Build Sawtooth
+#      run: |
+#        docker-compose -f docker-compose-installed.yaml build
+
+    - name: Run Tests
       run: |
         INSTALL_TYPE="" ./bin/run_tests -i deployment
