@@ -51,3 +51,9 @@ RUN pip3 install \
 ENV PATH=$PATH:/project/sawtooth-core/bin
 
 WORKDIR /project/sawtooth-core
+
+CMD echo "\033[0;32m--- Building cli ---\n\033[0m" \
+ && bin/protogen \
+ && cd cli \
+ && python3 setup.py clean --all \
+ && python3 setup.py build
