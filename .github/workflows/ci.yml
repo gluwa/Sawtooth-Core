@@ -4,6 +4,7 @@ on:
     branches:
       - main
       - dev
+      - tests/ci-attempted-fix
   pull_request:
 
 env:
