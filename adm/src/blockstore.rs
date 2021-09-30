@@ -214,10 +214,10 @@ impl<'a> Blockstore<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use config;
-    use database::lmdb::LmdbContext;
     use crate::proto::batch::{Batch, BatchHeader};
     use crate::proto::transaction::Transaction;
+    use config;
+    use database::lmdb::LmdbContext;
 
     /// Asserts that BLOCKSTORE has a current height of COUNT.
     fn assert_current_height(count: usize, blockstore: &Blockstore) {
