@@ -77,9 +77,27 @@ jobs:
 
     - name: Build Test Dependencies
       run: |
-        docker-compose -f docker-compose-installed.yaml build
-        # docker-compose -f docker/compose/external.yaml build
+        python --version
+        pip install yq
+
+        # build services one by one instead of
+        # docker-compose -f docker/compose/sawtooth-build.yaml build
+        # because we run out of disk space in GitHub
+        for SERVICE in $(cat docker/compose/sawtooth-build.yaml | ~/.local/bin/yq -r '.services | keys' -y | sed 's/- //'); do
+            echo "INFO: Will build $SERVICE"
+
+            docker-compose -f docker/compose/sawtooth-build.yaml build $SERVICE
+
+            # remove intermediary images
+            for IMAGE in $(docker images | grep "<none>" | tr -s ' ' | cut -f3 -d ' '); do
+                echo "INFO: Removing intermediary image $IMAGE"
+                docker rmi $IMAGE
+            done
+        done
+
+        echo "INFO: Docker images under test"
+        docker images
 
     - name: Run Tests
       run: |
-        INSTALL_TYPE="" ./bin/run_tests -i deployment
+        INSTALL_TYPE="" ./bin/run_tests
