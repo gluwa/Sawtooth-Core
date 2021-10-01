@@ -9,6 +9,7 @@ on:
 env:
   ISOLATION_ID: ${{ github.run_id }}
   DISTRO: bionic
+  SAWTOOTH_CORE: ${{ github.workspace }}
 
 jobs:
   lint:
