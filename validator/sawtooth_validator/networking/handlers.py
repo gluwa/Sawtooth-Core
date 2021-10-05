@@ -69,12 +69,15 @@ class ConnectHandler(Handler):
         """
         result = urlparse(endpoint)
         hostname = result.hostname
-        port = None
         try:
             port = result.port
         except:
-            pass
+            LOGGER.warning("Unparsed port in '{}'".format(endpoint))
+            return False
+
         if hostname is None or port is None:
+            LOGGER.warning(
+                "Malformed endpoint hostname '{}' port '{}'".format(hostname, port))
             return False
         else:
             for interface in interfaces:
@@ -110,7 +113,7 @@ class ConnectHandler(Handler):
         # Medium security risk.
         interfaces = ["*", ".".join(["0", "0", "0", "0"])]
         interfaces += netifaces.interfaces()
-        if self.is_valid_endpoint_host(interfaces, message.endpoint) is False:
+        if not self.is_valid_endpoint_host(interfaces, message.endpoint):
             LOGGER.warning("Connecting peer provided an invalid endpoint: %s; "
                            "Ignoring connection request.",
                            message.endpoint)
@@ -123,6 +126,16 @@ class ConnectHandler(Handler):
                 AUTHORIZATION_CONNECTION_RESPONSE)
 
         LOGGER.debug("Endpoint of connecting node is %s", message.endpoint)
+
+        connection_info = self._network._connections.get(connection_id)
+        if connection_info and connection_info.uri and connection_info.uri != message.endpoint:
+            connection_response = ConnectionResponse(
+                status=ConnectionResponse.ERROR)
+            return HandlerResult(
+                HandlerStatus.RETURN_AND_CLOSE,
+                message_out=connection_response,
+                message_type=validator_pb2.Message.
+                AUTHORIZATION_CONNECTION_RESPONSE)
         self._network.update_connection_endpoint(connection_id,
                                                  message.endpoint)
 
@@ -197,17 +210,12 @@ class DisconnectHandler(Handler):
     def handle(self, connection_id, message_content):
         message = DisconnectMessage()
         message.ParseFromString(message_content)
-        LOGGER.debug("got disconnect message from %s. sending ack",
+        LOGGER.debug("got disconnect message from %s",
                      connection_id)
 
-        ack = NetworkAcknowledgement()
-        ack.status = ack.OK
         self._network.remove_connection(connection_id)
 
-        return HandlerResult(
-            HandlerStatus.RETURN,
-            message_out=ack,
-            message_type=validator_pb2.Message.NETWORK_ACK)
+        return HandlerResult(HandlerStatus.DROP)
 
 
 class PingRequestHandler(Handler):
@@ -347,7 +355,8 @@ class AuthorizationTrustRequestHandler(Handler):
         auth_trust_response = AuthorizationTrustResponse(
             roles=[RoleType.Value("NETWORK")])
 
-        LOGGER.debug("Connection: %s is approved", connection_id)
+        LOGGER.debug("Connection: %s (%s) is approved",
+                     self._network.connection_id_to_endpoint(connection_id), connection_id)
 
         self._network.update_connection_status(
             connection_id,
@@ -532,7 +541,7 @@ class AuthorizationViolationHandler(Handler):
 
     def handle(self, connection_id, message_content):
         """
-        If an AuthorizationViolation is recieved, the connection has decided
+        If an AuthorizationViolation is received, the connection has decided
         that this validator is no longer permitted to be connected.
         Remove the connection preemptively.
         """
@@ -541,5 +550,5 @@ class AuthorizationViolationHandler(Handler):
         # Close the connection
         endpoint = self._network.connection_id_to_endpoint(connection_id)
         self._network.remove_connection(connection_id)
-        self._gossip.remove_temp_endpoint(endpoint)
+        self._gossip.remove_temp_connection_info(connection_id)
         return HandlerResult(HandlerStatus.DROP)

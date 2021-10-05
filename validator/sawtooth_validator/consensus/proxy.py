@@ -171,6 +171,7 @@ class ConsensusProxy:
             content, message_type, connection_id)
         self._gossip.send_consensus_message(
             peer_id=peer_id.hex(),
+            connection_id=connection_id,
             message=message)
 
     def broadcast(self, message_type, content, connection_id):

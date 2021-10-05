@@ -240,8 +240,7 @@ class _SendReceive:
         check_time = time.time()
         expired = \
             [(ident, check_time - timestamp)
-             for ident, timestamp
-             in self._last_message_times.items()
+             for ident, timestamp in self._last_message_times.items()
              if check_time - timestamp > self._heartbeat_interval]
         for zmq_identity, elapsed in expired:
             if self._is_connection_lost(
@@ -287,10 +286,10 @@ class _SendReceive:
     def _do_dealer_heartbeat(self):
         if self._last_message_time and \
                 self._is_connection_lost(self._last_message_time):
+            elapsed = time.time() - self._last_message_time
             LOGGER.info("No response from %s in %s seconds"
                         " - removing connection.",
-                        self._connection,
-                        self._last_message_time)
+                        self._connection, elapsed)
             connection_id = hashlib.sha512(
                 self.connection.encode()).hexdigest()
             if connection_id in self._connections:
@@ -326,7 +325,12 @@ class _SendReceive:
                 self._get_queue_size_gauge(self.connection).set_value(
                     self._dispatcher_queue.qsize())
                 message = validator_pb2.Message()
-                message.ParseFromString(msg_bytes)
+                try:
+                    message.ParseFromString(msg_bytes)
+                except:
+                    LOGGER.warning(
+                        "Incoming message couldn't be processed; dumping raw message\n{}".format(msg_bytes))
+                    raise
 
                 tag = get_enum_name(message.message_type)
                 self._get_received_message_counter(tag).inc()
@@ -705,7 +709,8 @@ class _SendReceive:
         if self._event_loop.is_running():
             if self._auth is not None:
                 self._event_loop.call_soon_threadsafe(self._auth.stop)
-            asyncio.ensure_future(self._stop(drop_functors=False), loop=self._event_loop)
+            asyncio.ensure_future(self._stop(
+                drop_functors=False), loop=self._event_loop)
         else:
             # event loop was never started, so the only Task that is running
             # is the Auth Task.
@@ -837,7 +842,7 @@ class Interconnect:
 
     def connection_id_to_endpoint(self, connection_id):
         """
-        Get stored public key for a connection.
+        Get stored endpoint for a connection.
         """
         with self._connections_lock:
             try:
@@ -1162,7 +1167,7 @@ class Interconnect:
                 connection_info = self._connections[connection_id]
                 if connection_info.uri == endpoint:
                     return connection_id
-            raise KeyError()
+        raise KeyError()
 
     def update_connection_endpoint(self, connection_id, endpoint):
         """Adds the endpoint to the connection definition. When the
