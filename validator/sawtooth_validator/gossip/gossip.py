@@ -236,21 +236,15 @@ class Gossip:
 
         Note: Needs Connection manager sync and Gossip sync.
 
-        TODO, revisit:
-        Any two nodes could try to register the counterparty as peer at the same time. both dynamically,statically or a mix and match.
-        Also there could be a stale peer that got rebooted  and is trying to connect again before this node realized the disconnection.
-        Is overwriting the connection ok? Endpoints always yield the same connection_id so maybe, yes.
-
         Returns:
             bool: returns true (an error) if at least one abandoned peer was found and removed.
         """
         stale_connections = [conn_id for conn_id,
                              peer in self._peers.items() if peer == endpoint]
-        for id in stale_connections:
-            self._unregister_peer(id)
-            self._topology._remove_temporary_connection(id)
+        for id_ in stale_connections:
+            self._unregister_peer(id_)
             LOGGER.debug(
-                "Abandoned peer {} ({}) removed.".format(id[:8], endpoint))
+                "Abandoned peer {} ({}) removed.".format(id_[:8], endpoint))
 
         return True if stale_connections else False
 
@@ -304,7 +298,6 @@ class Gossip:
             LOGGER.debug("Removed connection_id %s, "
                          "connected identities are now %s",
                          connection_id, self._peers)
-            # TODO, is setting connection satus to temp ok or is it better to just delete it?
             self._topology.set_connection_status(
                 connection_id, PeerStatus.TEMP)
         else:
@@ -419,15 +412,11 @@ class Gossip:
     def send(self, message_type, message, connection_id, one_way=False):
         """Sends a message via the network.
         Note: blocks Gossip.
-        TODO:
-        remove gossip lock guard, find another way to remove peer if the connection is dropped.
         Args:
             message_type (str): The type of the message.
             message (bytes): The message to be sent.
             connection_id (str): The connection to send it to.
         """
-        if not self._network.is_connection_handshake_complete(connection_id):
-            return
         try:
             self._network.send(message_type, message, connection_id,
                                one_way=one_way)
@@ -453,11 +442,12 @@ class Gossip:
         """
         if exclude is None:
             exclude = []
+        serialized_msg = gossip_message.SerializeToString(),
         for connection_id in self.get_peers():
             if connection_id not in exclude:
                 self.send(
                     message_type,
-                    gossip_message.SerializeToString(),
+                    serialized_msg,
                     connection_id,
                     one_way=True)
 
@@ -564,7 +554,6 @@ class ConnectionManager(InstrumentedThread):
         self._static_peer_status = {}
 
     def start(self):
-        # First, attempt to connect to explicit peers
         endpoints = set(self._initial_peer_endpoints) - set([self._endpoint])
         for endpoint in endpoints:
             self._static_peer_status[endpoint] = \
@@ -961,31 +950,25 @@ class ConnectionManager(InstrumentedThread):
     def _attempt_to_peer_with_endpoint(self, endpoint):
         """There could be an inbound peering connection in flight.
             There's no metadata in the Self to know what is the purpose of the inbound connection.
-            Let the abandoned peers logic catch this case; the peered connection (if sucessful) will be dropped in favor of the new outbound connection.
+            If there is any connection to the peer candidate, skip.
+            Don't try to peer over an outstanding connection as it may be temporary or already peering.
 
         Args:
             endpoint ([uri]): endpoint in the zmq form tcp://address:port
         """
 
-        connections = self._network.get_outbound_connections_id_by_endpoint(
-            endpoint)
-        with self._lock:
-            peering_conn_count = reduce(lambda c, conn: c +
-                                        1 if self._temp_connections.get(conn) and self._temp_connections[conn].status == ConnectionStatus.PEERING else c, connections, 0)
-
-            # there shouldn't be more than one outbound peering connection at any given time
-            assert(peering_conn_count <= 1)
-
-            # if a peering connection does not exist, create it
-            if peering_conn_count == 0:
-                LOGGER.debug("Attempting to connect/peer with %s", endpoint)
+        try:
+            conn_id = self._network.get_connection_id_by_endpoint(endpoint)
+        except KeyError:
+            LOGGER.debug("Attempting to connect/peer with %s", endpoint)
+            with self._lock:
                 new_conn = self._network.add_outbound_connection(
                     endpoint).connection_id
                 self._temp_connections[new_conn] = EndpointInfo(
                     endpoint, ConnectionStatus.PEERING, time.time(), INITIAL_RETRY_FREQUENCY)
-            else:
-                LOGGER.debug(
-                    "endpoint %s has %s outstanding peering connections", endpoint, connections)
+        else:
+            LOGGER.debug(
+                "endpoint %s has %s an outstanding connection", endpoint, conn_id)
 
     def _reset_candidate_peer_endpoints(self):
         """Needs sync"""
