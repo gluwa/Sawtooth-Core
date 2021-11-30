@@ -367,8 +367,19 @@ class _SendReceive:
         while True:
             try:
                 if self._socket.getsockopt(zmq.TYPE) == zmq.ROUTER:
-                    zmq_identity, msg_bytes = \
-                        yield from self._socket.recv_multipart()
+                    multipart = (yield from self._socket.recv_multipart())
+                    try:
+                        zmq_identity, msg_bytes = multipart
+                    except Exception as e:
+                        for part in multipart:
+                            LOGGER.critical("Part: %s", part)
+                            LOGGER.critical("MemAddr: %s", id(multipart))
+                            try:
+                                LOGGER.critical("ObjDump: %s", vars(multipart))
+                            except Exception:
+                                pass
+                        raise e
+
                     if msg_bytes == b'':
                         # send ACK for connection probes
                         LOGGER.debug("ROUTER PROBE FROM %s", zmq_identity)
@@ -705,7 +716,8 @@ class _SendReceive:
         if self._event_loop.is_running():
             if self._auth is not None:
                 self._event_loop.call_soon_threadsafe(self._auth.stop)
-            asyncio.ensure_future(self._stop(drop_functors=False), loop=self._event_loop)
+            asyncio.ensure_future(self._stop(
+                drop_functors=False), loop=self._event_loop)
         else:
             # event loop was never started, so the only Task that is running
             # is the Auth Task.
