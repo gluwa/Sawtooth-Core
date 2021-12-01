@@ -704,8 +704,10 @@ class ConnectionManager(InstrumentedThread):
                 candidates, peers_rev_map = self._endpoints_not_peered(
                     self._initial_peer_endpoints)
 
-        # refresh status for connected peers
-        for endpoint in peers_rev_map.keys():
+        # refresh status for connected static peers
+        static_endpoints_not_peered = set(peers_rev_map.keys()).intersection(
+            set(self._initial_peer_endpoints))
+        for endpoint in static_endpoints_not_peered:
             self._static_peer_status[endpoint] = \
                 StaticPeerInfo(
                     self._static_peer_status[endpoint].connection_id,
