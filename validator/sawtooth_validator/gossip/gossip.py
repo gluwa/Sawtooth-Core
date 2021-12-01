@@ -442,7 +442,7 @@ class Gossip:
         """
         if exclude is None:
             exclude = []
-        serialized_msg = gossip_message.SerializeToString(),
+        serialized_msg = gossip_message.SerializeToString()
         for connection_id in self.get_peers():
             if connection_id not in exclude:
                 self.send(
