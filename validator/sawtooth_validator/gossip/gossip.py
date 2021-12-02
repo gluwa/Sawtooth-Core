@@ -759,7 +759,7 @@ class ConnectionManager(InstrumentedThread):
                     complete = self._network.is_connection_handshake_complete(
                         connection_id)
                     if not complete:
-                        with self._lock(self.retry_static_peering.__name__):
+                        with self._lock:
                             self._remove_temp_connection_info(connection_id)
                             self._network.remove_connection(connection_id)
                 else:
