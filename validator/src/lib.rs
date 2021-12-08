@@ -39,3 +39,5 @@ mod block_ffi;
 pub(crate) mod transaction;
 
 pub(crate) mod ffi;
+
+pub(crate) mod ext;

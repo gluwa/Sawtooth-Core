@@ -20,6 +20,7 @@ use cpython::{ObjectProtocol, PyClone, PyDict};
 use crate::block::Block;
 use crate::execution::execution_platform::ExecutionPlatform;
 
+use crate::ext::ResultExt;
 use crate::scheduler::py_scheduler::PyScheduler;
 use crate::scheduler::Scheduler;
 
@@ -50,7 +51,7 @@ impl ExecutionPlatform for PyExecutor {
         let scheduler = self
             .executor
             .call_method(py, "create_scheduler", (state_hash,), kwargs.as_ref())
-            .expect(
+            .expect_pyerr(
                 "no method create_scheduler on sawtooth_validator.execution.py_executor.PyExecutor",
             );
         Ok(Box::new(PyScheduler::new(scheduler)))

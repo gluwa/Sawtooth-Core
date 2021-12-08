@@ -19,6 +19,7 @@
 
 use crate::batch::Batch;
 use crate::block::Block;
+use crate::ext::ResultExt;
 
 use cpython::{NoArgs, ObjectProtocol, PyClone, PyDict, PyList, PyObject, Python};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -223,7 +224,7 @@ impl SyncBlockPublisher {
     fn load_injectors(&self, py: Python, state_root: &str) -> Vec<PyObject> {
         self.batch_injector_factory
             .call_method(py, "create_injectors", (state_root,), None)
-            .expect("BatchInjectorFactory has no method 'create_injectors'")
+            .expect_pyerr("BatchInjectorFactory has no method 'create_injectors'")
             .extract::<PyList>(py)
             .unwrap()
             .iter(py)
@@ -457,9 +458,9 @@ impl SyncBlockPublisher {
     fn get_public_key(&self, py: Python) -> String {
         self.identity_signer
             .call_method(py, "get_public_key", NoArgs, None)
-            .expect("IdentitySigner has no method get_public_key")
+            .expect_pyerr("IdentitySigner has no method get_public_key")
             .call_method(py, "as_hex", NoArgs, None)
-            .expect("PublicKey object as no method as_hex")
+            .expect_pyerr("PublicKey object as no method as_hex")
             .extract::<String>(py)
             .unwrap()
     }
@@ -485,7 +486,7 @@ impl SyncBlockPublisher {
 
             self.permission_verifier
                 .call_method(py, "is_batch_signer_authorized", (batch.clone(),), None)
-                .expect("PermissionVerifier has no method is_batch_signer_authorized")
+                .expect_pyerr("PermissionVerifier has no method is_batch_signer_authorized")
                 .extract(py)
                 .expect("PermissionVerifier.is_batch_signer_authorized did not return bool")
         };

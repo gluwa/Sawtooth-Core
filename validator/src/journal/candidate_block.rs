@@ -19,6 +19,7 @@
 
 use std::collections::HashSet;
 
+use crate::ext::ResultExt;
 use crate::ffi::{self, ObjectProtocol, PyClone, Python};
 
 use crate::hashlib::sha256_digest_strs;
@@ -314,7 +315,7 @@ impl CandidateBlock {
                         let py = gil.python();
                         match injector
                             .call_method(py, "block_start", (previous_block.clone(),), None)
-                            .expect("BlockInjector.block_start failed")
+                            .expect_pyerr("BlockInjector.block_start failed")
                             .extract::<cpython::PyList>(py)
                         {
                             Ok(injected) => injected.iter(py).collect(),
@@ -362,11 +363,11 @@ impl CandidateBlock {
 
         self.identity_signer
             .call_method(py, "get_public_key", cpython::NoArgs, None)
-            .expect("IdentitySigner has no method 'get_public_key'")
+            .expect_pyerr("IdentitySigner has no method 'get_public_key'")
             .call_method(py, "as_hex", cpython::NoArgs, None)
-            .expect("PublicKey has no method 'as_hex'")
+            .expect_pyerr("PublicKey has no method 'as_hex'")
             .extract(py)
-            .expect("Unable to convert python string to rust")
+            .expect_pyerr("Unable to convert python string to rust")
     }
 
     pub fn sign_block(&self, block_builder: &cpython::PyObject) {
@@ -374,16 +375,16 @@ impl CandidateBlock {
         let py = gil.python();
         let header_bytes = block_builder
             .getattr(py, "block_header")
-            .expect("BlockBuilder has no attribute 'block_header'")
+            .expect_pyerr("BlockBuilder has no attribute 'block_header'")
             .call_method(py, "SerializeToString", cpython::NoArgs, None)
             .unwrap();
         let signature = self
             .identity_signer
             .call_method(py, "sign", (header_bytes,), None)
-            .expect("Signer has no method 'sign'");
+            .expect_pyerr("Signer has no method 'sign'");
         block_builder
             .call_method(py, "set_signature", (signature,), None)
-            .expect("BlockBuilder has no method 'set_signature'");
+            .expect_pyerr("BlockBuilder has no method 'set_signature'");
     }
 
     pub fn summarize(&mut self, force: bool) -> Result<Option<Vec<u8>>, CandidateBlockError> {
@@ -473,7 +474,7 @@ impl CandidateBlock {
                     let py = gil.python();
                     builder
                         .call_method(py, "add_batch", (batch.clone(),), None)
-                        .expect("BlockBuilder has no method 'add_batch'");
+                        .expect_pyerr("BlockBuilder has no method 'add_batch'");
                     committed_txn_cache.add_batch(&batch.clone());
                 }
             } else {
@@ -501,13 +502,13 @@ impl CandidateBlock {
                 (execution_results.ending_state_hash,),
                 None,
             )
-            .expect("BlockBuilder has no method 'set_state_hash'");
+            .expect_pyerr("BlockBuilder has no method 'set_state_hash'");
 
         let batches = builder
             .getattr(py, "batches")
-            .expect("BlockBuilder has no attribute 'batches'")
+            .expect_pyerr("BlockBuilder has no attribute 'batches'")
             .extract::<Vec<Batch>>(py)
-            .expect("Unable to extract PyList of Batches as Vec<Batch>");
+            .expect_pyerr("Unable to extract PyList of Batches as Vec<Batch>");
 
         let batch_ids: Vec<&str> = batches
             .iter()
@@ -539,16 +540,16 @@ impl CandidateBlock {
         let py = gil.python();
         builder
             .getattr(py, "block_header")
-            .expect("BlockBuilder has no attribute 'block_header'")
+            .expect_pyerr("BlockBuilder has no attribute 'block_header'")
             .setattr(py, "consensus", cpython::PyBytes::new(py, consensus_data))
-            .expect("BlockHeader has no attribute 'consensus'");
+            .expect_pyerr("BlockHeader has no attribute 'consensus'");
 
         self.sign_block(builder);
 
         self.build_result(Some(
             builder
                 .call_method(py, "build_block", cpython::NoArgs, None)
-                .expect("BlockBuilder has no method 'build_block'"),
+                .expect_pyerr("BlockBuilder has no method 'build_block'"),
         ))
     }
 
@@ -557,7 +558,7 @@ impl CandidateBlock {
         let py = gil.python();
         builder
             .getattr(py, "batches")
-            .expect("BlockBuilder has no attribute 'batches'")
+            .expect_pyerr("BlockBuilder has no attribute 'batches'")
             .extract::<cpython::PyList>(py)
             .unwrap()
             .len(py)

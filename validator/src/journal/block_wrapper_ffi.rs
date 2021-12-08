@@ -17,6 +17,7 @@
 
 use cpython::{FromPyObject, ObjectProtocol, PyClone, PyObject, Python, ToPyObject};
 
+use crate::ext::ResultExt;
 use crate::journal::block_wrapper::BlockStatus;
 use crate::journal::block_wrapper::BlockWrapper;
 use lazy_static::lazy_static;
@@ -46,19 +47,19 @@ impl ToPyObject for BlockStatus {
         match *self {
             BlockStatus::Unknown => PY_BLOCK_STATUS
                 .getattr(py, "Unknown")
-                .expect("No BlockStatus.Unknown"),
+                .expect_pyerr("No BlockStatus.Unknown"),
             BlockStatus::Invalid => PY_BLOCK_STATUS
                 .getattr(py, "Invalid")
-                .expect("No BlockStatus.Invalid"),
+                .expect_pyerr("No BlockStatus.Invalid"),
             BlockStatus::Valid => PY_BLOCK_STATUS
                 .getattr(py, "Valid")
-                .expect("No BlockStatus.Valid"),
+                .expect_pyerr("No BlockStatus.Valid"),
             BlockStatus::Missing => PY_BLOCK_STATUS
                 .getattr(py, "Missing")
-                .expect("No BlockStatus.Missing"),
+                .expect_pyerr("No BlockStatus.Missing"),
             BlockStatus::InValidation => PY_BLOCK_STATUS
                 .getattr(py, "InValidation")
-                .expect("No BlockStatus.InValidation"),
+                .expect_pyerr("No BlockStatus.InValidation"),
         }
     }
 }

@@ -16,6 +16,7 @@
  */
 use crate::batch::Batch;
 use crate::block::Block;
+use crate::ext::ResultExt;
 use crate::proto::batch::Batch as ProtoBatch;
 use crate::proto::batch::BatchHeader;
 use crate::proto::block::Block as ProtoBlock;
@@ -151,7 +152,7 @@ impl ToPyObject for Block {
                 (cpython::PyBytes::new(py, &proto_block.write_to_bytes().unwrap()).into_object(),),
                 None,
             )
-            .expect("Unable to ParseFromString");
+            .expect_pyerr("Unable to ParseFromString");
         block
     }
 }

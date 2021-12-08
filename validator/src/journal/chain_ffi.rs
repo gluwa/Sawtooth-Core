@@ -22,6 +22,7 @@ use crate::consensus::notifier::BackgroundConsensusNotifier;
 use crate::consensus::registry_ffi::PyConsensusRegistry;
 use crate::database::lmdb::LmdbDatabase;
 use crate::execution::py_executor::PyExecutor;
+use crate::ext::ResultExt;
 use crate::gossip::permission_verifier::PyPermissionVerifier;
 use crate::journal::block_manager::BlockManager;
 use crate::journal::block_validator::{BlockValidationResultStore, BlockValidator};
@@ -367,7 +368,7 @@ impl ToPyObject for TransactionReceipt {
                 (cpython::PyBytes::new(py, &self.write_to_bytes().unwrap()).into_object(),),
                 None,
             )
-            .expect("Unable to ParseFromString");
+            .expect_pyerr("Unable to ParseFromString");
 
         py_txn_receipt
     }

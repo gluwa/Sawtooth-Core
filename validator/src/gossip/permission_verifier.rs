@@ -17,7 +17,7 @@
 
 use cpython::{self, ObjectProtocol, PyClone};
 
-use crate::batch::Batch;
+use crate::{batch::Batch, ext::ResultExt};
 
 pub trait PermissionVerifier: Sync + Send {
     fn is_batch_signer_authorized(&self, batch: &Batch, state_root: &str) -> bool;
@@ -40,7 +40,7 @@ impl PermissionVerifier for PyPermissionVerifier {
 
         self.verifier
             .call_method(py, "is_batch_signer_authorized", (batch, state_root), None)
-            .expect("PermissionVerifier has no method `is_batch_signer_authorized`")
+            .expect_pyerr("PermissionVerifier has no method `is_batch_signer_authorized`")
             .extract(py)
             .expect("Unable to extract bool from `is_batch_signer_authorized`")
     }

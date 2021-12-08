@@ -15,8 +15,8 @@
  * ------------------------------------------------------------------------------
  */
 
-use crate::batch::Batch;
 use crate::block::Block;
+use crate::{batch::Batch, ext::ResultExt};
 use std::fmt;
 
 use cpython::{self, ObjectProtocol, PyClone, PyObject};
@@ -59,9 +59,9 @@ impl BlockWrapper {
 
         self.py_block_wrapper
             .getattr(py, "header_signature")
-            .expect("Failed to get BlockWrapper.header_signature")
+            .expect_pyerr("Failed to get BlockWrapper.header_signature")
             .extract(py)
-            .expect("Failed to extract BlockWrapper.header_signature")
+            .expect_pyerr("Failed to extract BlockWrapper.header_signature")
     }
 
     pub fn previous_block_id(&self) -> String {
@@ -69,9 +69,9 @@ impl BlockWrapper {
         let py = gil.python();
         self.py_block_wrapper
             .getattr(py, "previous_block_id")
-            .expect("Failed to get BlockWrapper.previous_block_id")
+            .expect_pyerr("Failed to get BlockWrapper.previous_block_id")
             .extract(py)
-            .expect("Failed to extract BlockWrapper.previous_block_id")
+            .expect_pyerr("Failed to extract BlockWrapper.previous_block_id")
     }
 
     pub fn block_num(&self) -> u64 {
@@ -79,9 +79,9 @@ impl BlockWrapper {
         let py = gil.python();
         self.py_block_wrapper
             .getattr(py, "block_num")
-            .expect("Failed to get BlockWrapper.block_num")
+            .expect_pyerr("Failed to get BlockWrapper.block_num")
             .extract(py)
-            .expect("Failed to extract BlockWrapper.block_num")
+            .expect_pyerr("Failed to extract BlockWrapper.block_num")
     }
 
     pub fn batches(&self) -> Vec<Batch> {
@@ -89,9 +89,9 @@ impl BlockWrapper {
         let py = gil.python();
         self.py_block_wrapper
             .getattr(py, "batches")
-            .expect("Failed to get BlockWrapper.batches")
+            .expect_pyerr("Failed to get BlockWrapper.batches")
             .extract(py)
-            .expect("Failed to extract BlockWrapper.batches")
+            .expect_pyerr("Failed to extract BlockWrapper.batches")
     }
 
     pub fn state_root_hash(&self) -> String {
@@ -99,9 +99,9 @@ impl BlockWrapper {
         let py = gil.python();
         self.py_block_wrapper
             .getattr(py, "state_root_hash")
-            .expect("Failed to get BlockWrapper.state_root_hash")
+            .expect_pyerr("Failed to get BlockWrapper.state_root_hash")
             .extract(py)
-            .expect("Failed to extract BlockWrapper.state_root_hash")
+            .expect_pyerr("Failed to extract BlockWrapper.state_root_hash")
     }
 
     pub fn block(&self) -> Block {
@@ -109,9 +109,9 @@ impl BlockWrapper {
         let py = gil.python();
         self.py_block_wrapper
             .getattr(py, "block")
-            .expect("Failed to get BlockWrapper.block")
+            .expect_pyerr("Failed to get BlockWrapper.block")
             .extract(py)
-            .expect("Failed to extract BlockWrapper.block")
+            .expect_pyerr("Failed to extract BlockWrapper.block")
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::ext::ResultExt;
 /*
  * Copyright 2018 Intel Corporation
  *
@@ -414,6 +415,6 @@ impl BatchObserver for PyBatchObserver {
         let py = gil.python();
         self.py_batch_observer
             .call_method(py, "notify_batch_pending", (batch,), None)
-            .expect("BatchObserver has no method notify_batch_pending");
+            .expect_pyerr("BatchObserver has no method notify_batch_pending");
     }
 }

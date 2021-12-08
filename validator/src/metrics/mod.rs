@@ -17,6 +17,8 @@ use std::collections::HashMap;
 
 use cpython::{NoArgs, ObjectProtocol, PyDict, PyModule, PyObject, Python, ToPyObject};
 
+use crate::ext::ResultExt;
+
 pub fn get_collector<S: AsRef<str>>(name: S) -> MetricsCollectorHandle {
     let gil = Python::acquire_gil();
     let py = gil.python();
@@ -99,7 +101,7 @@ impl MetricsCollectorHandle {
 
         self.py_collector
             .call_method(py, metric_type, (metric_name.as_ref(),), Some(&kwargs))
-            .expect("Failed to create new metric")
+            .expect_pyerr("Failed to create new metric")
     }
 }
 
@@ -113,7 +115,7 @@ impl Gauge {
         let py = gil.python();
         self.py_gauge
             .call_method(py, "set_value", (value,), None)
-            .expect("Failed to call Gauge.set_value()");
+            .expect_pyerr("Failed to call Gauge.set_value()");
     }
 }
 
@@ -127,7 +129,7 @@ impl Counter {
         let py = gil.python();
         self.py_counter
             .call_method(py, "inc", NoArgs, None)
-            .expect("Failed to call Counter.inc()");
+            .expect_pyerr("Failed to call Counter.inc()");
     }
 
     pub fn inc_n(&mut self, value: usize) {
@@ -135,7 +137,7 @@ impl Counter {
         let py = gil.python();
         self.py_counter
             .call_method(py, "inc", (value,), None)
-            .expect("Failed to call Counter.inc()");
+            .expect_pyerr("Failed to call Counter.inc()");
     }
 
     pub fn dec_n(&mut self, value: usize) {
@@ -143,6 +145,6 @@ impl Counter {
         let py = gil.python();
         self.py_counter
             .call_method(py, "dec", (value,), None)
-            .expect("Failed to call Counter.dec()");
+            .expect_pyerr("Failed to call Counter.dec()");
     }
 }
