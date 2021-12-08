@@ -714,11 +714,6 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
                 block.header_signature, result.status,
             ),
         }
-
-        match self.notify_block_validation_results_received(&block) {
-            Ok(_) => (),
-            Err(err) => warn!("{:?}", err),
-        }
     }
 
     fn handle_block_commit(&mut self, block: &Block) -> Result<(), ChainControllerError> {
@@ -894,6 +889,10 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
                 }
 
                 // Updated the block, so we're done
+                match self.notify_block_validation_results_received(&block) {
+                    Ok(_) => (),
+                    Err(err) => warn!("{:?}", err),
+                }
                 break;
             }
         }
