@@ -40,6 +40,8 @@ from sawtooth_validator.protobuf.network_pb2 import GetPeersResponse
 from sawtooth_validator.protobuf.network_pb2 import NetworkAcknowledgement
 from sawtooth_validator.exceptions import PeeringException
 
+from sawtooth_validator.journal.block_wrapper import BlockWrapper
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -620,13 +622,15 @@ class ConnectionManager(InstrumentedThread):
 
     def _request_chain_head(self, peered_connections):
         """Request chain head from the given peer ids.
+        Should only be called in the degenerate case where
+        neither our peers or this node have had a valid chain head.
 
         Args:
             peered_connecions (:list:str): a list of peer connection ids where
                 the requests will be sent.
         """
         for conn_id in peered_connections:
-            self._gossip.send_block_request("HEAD", conn_id)
+            self._gossip.send_block_request("HEAD~0", conn_id)
 
     def retry_dynamic_peering(self):
         with self._lock:
@@ -988,9 +992,12 @@ class ConnectionManager(InstrumentedThread):
                 LOGGER.debug("Peering request to {} ({}) was successful".format(
                     connection_id, endpoint))
                 if endpoint:
+                    w_head = self._current_chain_head_func()
+                    block_id = "HEAD~" + \
+                        str(w_head.block_num) if w_head is not None else "HEAD~0"
                     try:
-                        self._gossip._register_peer(connection_id, endpoint)
-                        self._gossip.send_block_request("HEAD", connection_id)
+                        self._gossip.register_peer(connection_id, endpoint)
+                        self._gossip.send_block_request( block_id, connection_id)
                     except PeeringException as e:
                         LOGGER.warning('Unable to successfully peer with connection_id: %s (%s), due to %s',
                                        connection_id, endpoint, str(e))
