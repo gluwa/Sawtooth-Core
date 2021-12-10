@@ -888,11 +888,14 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
                     state.state_pruning_manager.execute(prune_at)
                 }
 
-                // Updated the block, so we're done
-                match self.notify_block_validation_results_received(&block) {
+                // Notify scheduler that the block is complete, so dependent blocks
+                // can begin validation
+                match self.notify_block_committed(&block) {
                     Ok(_) => (),
                     Err(err) => warn!("{:?}", err),
                 }
+
+                // Updated the block, so we're done
                 break;
             }
         }
@@ -921,10 +924,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         }
     }
 
-    fn notify_block_validation_results_received(
-        &self,
-        block: &Block,
-    ) -> Result<(), ChainControllerError> {
+    fn notify_block_committed(&self, block: &Block) -> Result<(), ChainControllerError> {
         let sender = self
             .validation_result_sender
             .as_ref()
