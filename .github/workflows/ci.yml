@@ -40,6 +40,7 @@ jobs:
 
   bandit:
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
     - uses: actions/checkout@v2
@@ -60,6 +61,12 @@ jobs:
       run: |
         docker run --rm -v $(pwd):/project/sawtooth-core bandit:$ISOLATION_ID run_bandit
 
+    - name: Upload report from Bandit
+      uses: actions/upload-artifact@v2
+      if: failure()
+      with:
+        name: bandit.html
+        path: build/bandit.html
 
   test-sawtooth-core:
     runs-on: ubuntu-latest
