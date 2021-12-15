@@ -194,7 +194,7 @@ def main(args):
             port = parsed_endpoint.port
         except:
             pass
-        if parsed_endpoint.hostname in ['localhost', '0.0.0.0', '127.0.0.1', 'insert.your.ip'] or port is None:
+        if parsed_endpoint.hostname in ['localhost', '0.0.0.0', '127.0.0.1', 'insert.your.ip'] or port is None: # nosec
             LOGGER.error(
                 "Invalid endpoint %s. The endpoint must be your public ip and contain a port (e.g. :8800).", endpoint)
             init_errors = True
