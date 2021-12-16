@@ -349,27 +349,42 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         }
     }
 
+    //fetch from cache or ask the validator or lookup in block store, if its there return StatusValid
     pub fn block_validation_result(&self, block_id: &str) -> Option<BlockValidationResult> {
-        self.block_validation_results.get(block_id).or_else(|| {
-            if self
-                .state
-                .read()
-                .expect("Unable to acquire read lock, due to poisoning")
-                .chain_reader
-                .get_block_by_block_id(block_id)
-                .expect("ChainReader errored reading from the database")
-                .is_some()
-            {
-                let result = BlockValidationResult {
-                    block_id: block_id.into(),
-                    execution_results: vec![],
-                    num_transactions: 0,
-                    status: BlockStatus::Valid,
-                };
-                return Some(result);
-            }
-            None
-        })
+        self.block_validation_results
+            .get(block_id)
+            .or_else(|| {
+                if self.block_validator.has_block(block_id) {
+                    Some(BlockValidationResult {
+                        block_id: block_id.into(),
+                        execution_results: vec![],
+                        num_transactions: 0,
+                        status: BlockStatus::InValidation,
+                    })
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                if self
+                    .state
+                    .read()
+                    .expect("Unable to acquire read lock, due to poisoning")
+                    .chain_reader
+                    .get_block_by_block_id(block_id)
+                    .expect("ChainReader errored reading from the database")
+                    .is_some()
+                {
+                    let result = BlockValidationResult {
+                        block_id: block_id.into(),
+                        execution_results: vec![],
+                        num_transactions: 0,
+                        status: BlockStatus::Valid,
+                    };
+                    return Some(result);
+                }
+                None
+            })
     }
 
     /// This is used by a non-genesis journal when it has received the
@@ -552,17 +567,10 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
             .block_validation_results
             .get(&block.header_signature)
             .is_some()
+            || self.block_validator.has_block(&block.header_signature)
         {
             return;
         }
-
-        // Create block validation result, maked as in-validation
-        self.block_validation_results.insert(BlockValidationResult {
-            block_id: block.header_signature.clone(),
-            execution_results: vec![],
-            num_transactions: 0,
-            status: BlockStatus::InValidation,
-        });
 
         // Submit for validation
         let sender = self.validation_result_sender.as_ref().expect(
@@ -647,6 +655,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         Some(forks)
     }
 
+    ///cache the blockvalidation result status.
     fn set_block_validation_result(&self, result: BlockValidationResult) {
         self.block_validation_results.insert(result)
     }
@@ -673,6 +682,8 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         }
     }
 
+    //missing Marking descendant blocks invalid
+    //TODO
     fn on_block_validated(&self, block: &Block, result: &BlockValidationResult) {
         let mut blocks_considered_count =
             COLLECTOR.counter("ChainController.blocks_considered_count", None, None);
@@ -709,13 +720,20 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
                     );
                 }
             }
-            _ => error!(
-                "on_block_validated() called for block {}, but result was {:?}",
-                block.header_signature, result.status,
-            ),
+            //shouldnt happen, only valid or invalid should be recvd and processed.
+            _ => {
+                error!(
+                    "on_block_validated() called for block {}, but result was {:?}",
+                    block.header_signature, result.status,
+                );
+                unreachable!()
+            }
         }
 
-        match self.notify_block_validation_results_received(&block) {
+        // Notify scheduler that the block is complete, so dependent blocks
+        // can begin validation
+        //is it needed to be called after an invalid result? Yes.
+        match self.notify_block_validation_results_received(&block, &result.status) {
             Ok(_) => (),
             Err(err) => warn!("{:?}", err),
         }
@@ -922,19 +940,31 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         }
     }
 
+    // a valid result for a block
+    // TODO
     fn notify_block_validation_results_received(
         &self,
         block: &Block,
+        status: &BlockStatus,
     ) -> Result<(), ChainControllerError> {
         let sender = self
             .validation_result_sender
             .as_ref()
             .expect("Unable to ref validation_result_sender");
 
-        self.block_validator.process_pending(block, &sender);
+        //process pending descendants
+        let mark_descendants_invalid: bool = match status {
+            BlockStatus::Valid => false,
+            BlockStatus::Invalid => true,
+            _ => unreachable!(),
+        };
+        self.block_validator
+            .process_pending(block, &sender, mark_descendants_invalid);
         Ok(())
     }
 
+    //checking
+    //set event handler in completer.py
     pub fn queue_block(&self, block_id: &str) {
         if self.block_queue_sender.is_some() {
             let sender = self.block_queue_sender.clone();
@@ -1037,6 +1067,9 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         let result_thread_controller = self.light_clone();
         result_thread_builder
             .spawn(move || loop {
+                //receive results, from
+                //validator/src/journal/block_validator.rs::266
+                //will send either on valid and failure or retry
                 let block_validation_result = match validation_result_receiver
                     .recv_timeout(Duration::from_millis(RECV_TIMEOUT_MILLIS))
                 {
@@ -1055,9 +1088,12 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
                 };
 
                 if !result_thread_exit.load(Ordering::Relaxed) {
+                    //cached to 512 lru
+                    //what for is it cached?
                     result_thread_controller
                         .set_block_validation_result(block_validation_result.clone());
                     if let Some(block) = result_thread_controller
+                        //get block from manager
                         .get_block(&block_validation_result.block_id) {
                             result_thread_controller.on_block_validated(&block, &block_validation_result);
                         } else {

@@ -84,13 +84,19 @@ impl BlockValidationResultStore {
     }
 
     pub fn fail_block(&self, block_id: &str) {
-        if let Some(ref mut result) = self
+        let mut cache = self
             .validation_result_cache
             .lock()
-            .expect("The mutex is poisoned")
-            .find(|r| r.block_id == block_id)
-        {
+            .expect("The mutex is poisoned");
+        if let Some(ref mut result) = cache.find(|r| r.block_id == block_id) {
             result.status = BlockStatus::Invalid
+        } else {
+            cache.insert(BlockValidationResult {
+                status: BlockStatus::Invalid,
+                block_id: block_id.into(),
+                execution_results: vec![],
+                num_transactions: 0,
+            });
         }
     }
 }
@@ -266,6 +272,8 @@ where
                 match block_validations.validate_block(&block) {
                     Ok(result) => {
                         info!("Block {} passed validation", block_id);
+                        //send to validator/src/journal/chain.rs::start_validation_result_threadstart_validation_result_thread
+                        //validator/src/journal/chain.rs::1032
                         if let Err(err) = results_sender.send(result) {
                             warn!("During handling valid block: {:?}", err);
                             exit.store(true, Ordering::Relaxed);
@@ -273,6 +281,7 @@ where
                     }
                     Err(ValidationError::BlockValidationFailure(ref reason)) => {
                         warn!("Block {} failed validation: {}", &block_id, reason);
+                        // send invalid
                         if let Err(err) = results_sender.send(BlockValidationResult {
                             block_id,
                             execution_results: vec![],
@@ -283,6 +292,7 @@ where
                             exit.store(true, Ordering::Relaxed);
                         }
                     }
+                    // retry
                     Err(err) => {
                         warn!("Error during block validation: {:?}", err);
                         if let Err(err) = error_return_sender.send((block, results_sender)) {
@@ -340,12 +350,31 @@ where
         }
     }
 
-    pub fn process_pending(&self, block: &Block, response_sender: &Sender<BlockValidationResult>) {
-        for block in self.block_scheduler.done(&block.header_signature) {
+    ///call for block validation on descendants not being processed, send a channel to send the validation result.
+    /// is this called elsewhere? No. Can we add an is valid check?
+    /// this was meant to be called on both valid and invalid results, can we omit on invalid?
+    /// TODO
+    /// RFC, call done for all descendants if current block is invalid
+    /// result should be in cache, only for the first block marked invalid, try to skip validation and deschedule all descendants blocks, those are marked invalid too.
+    /// BFS, if current block is invalid, skip validation and deschedule all descendants blocks, those are marked invalid too.
+    pub fn process_pending(
+        &self,
+        block: &Block,
+        response_sender: &Sender<BlockValidationResult>,
+        mark_descendants_invalid: bool,
+    ) {
+        //try to fetch result from the result cache
+        //does 1.2 process invalid blocks as 1.0 used to, search for 'invalid' propagation
+        let pending_descendants_marked_for_processing = self
+            .block_scheduler
+            .done(&block.header_signature, mark_descendants_invalid);
+        if !mark_descendants_invalid {
             let tx = self.return_sender();
-            if let Err(err) = tx.send((block, response_sender.clone())) {
-                warn!("During process pending: {:?}", err);
-                self.validation_thread_exit.store(true, Ordering::Relaxed);
+            for block in pending_descendants_marked_for_processing {
+                if let Err(err) = tx.send((block, response_sender.clone())) {
+                    warn!("During process pending: {:?}", err);
+                    self.validation_thread_exit.store(true, Ordering::Relaxed);
+                }
             }
         }
     }

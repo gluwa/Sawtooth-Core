@@ -60,12 +60,14 @@ impl<B: BlockStatusStore> BlockScheduler<B> {
     }
 
     /// Mark the block associated with block_id as having completed block
-    /// validation, returning any blocks that are not available for processing
-    pub fn done(&self, block_id: &str) -> Vec<Block> {
+    /// validation, returning any descendants marked for processing.
+    /// Will remove block_id from processing, take all descendants, and move
+    /// them to processing.
+    pub fn done(&self, block_id: &str, mark_descendants_invalid: bool) -> Vec<Block> {
         self.state
             .lock()
             .expect("The BlockScheduler Mutex was poisoned")
-            .done(block_id)
+            .done(block_id, mark_descendants_invalid)
     }
 
     pub fn contains(&self, block_id: &str) -> bool {
@@ -194,7 +196,9 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
         }
     }
 
-    fn done(&mut self, block_id: &str) -> Vec<Block> {
+    /// Remove from processing and move all descendants from pending to processing.
+    /// When a block is marked invalid, thus all descendants are invalid, do not process them.
+    fn done(&mut self, block_id: &str, mark_descendants_invalid: bool) -> Vec<Block> {
         self.processing.remove(block_id);
         let ready = self
             .descendants_by_previous_id
@@ -203,7 +207,15 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
 
         for blk in &ready {
             self.pending.remove(&blk.header_signature);
-            self.processing.insert(blk.header_signature.clone());
+            if !mark_descendants_invalid {
+                //look for side effects when an invalid block was not processed.
+                self.processing.insert(blk.header_signature.clone());
+            } else {
+                info!(
+                    "Predecessor {} marked invalid, marking descendant {} invalid",
+                    block_id, &blk.header_signature
+                );
+            }
         }
 
         self.update_gauges();
@@ -214,6 +226,8 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
         self.pending.contains(block_id) || self.processing.contains(block_id)
     }
 
+    ///insert into pending and get back the pred's descendant, if its is not already ther,
+    /// insert it.
     fn add_block_to_pending(&mut self, block: Block) {
         self.pending.insert(block.header_signature.clone());
         if let Some(ref mut waiting_descendants) = self
