@@ -25,7 +25,7 @@ use crate::journal::chain::COMMIT_STORE;
 use crate::journal::{block_manager::BlockManager, NULL_BLOCK_IDENTIFIER};
 use crate::metrics;
 use lazy_static::lazy_static;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 
 lazy_static! {
     static ref COLLECTOR: metrics::MetricsCollectorHandle =
@@ -53,6 +53,12 @@ impl<B: BlockStatusStore> BlockScheduler<B> {
     /// Schedule the blocks, returning those that are directly ready to
     /// validate
     pub fn schedule(&self, blocks: Vec<Block>) -> Vec<Block> {
+        for b in &blocks {
+            error!(
+                "Scheduling block {} from chaincontroller",
+                b.header_signature[..8].to_string()
+            );
+        }
         self.state
             .lock()
             .expect("The BlockScheduler Mutex was poisoned")
@@ -125,7 +131,10 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
                 continue;
             }
 
+            //block and pred are not in validation
+
             if block.previous_block_id != NULL_BLOCK_IDENTIFIER
+            //results not found though
                 && self.block_validity(&block.previous_block_id) == BlockStatus::Unknown
             {
                 info!(
@@ -139,10 +148,11 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
 
                 let mut to_be_scheduled = vec![];
                 for predecessor in blocks_previous_to_previous {
-                    if self
-                        .block_status_store
-                        .status(&predecessor.header_signature)
-                        != BlockStatus::Unknown
+                    if self.contains(&predecessor.header_signature)
+                        || self
+                            .block_status_store
+                            .status(&predecessor.header_signature)
+                            != BlockStatus::Unknown
                     {
                         break;
                     }
@@ -159,6 +169,13 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
                 }
 
                 to_be_scheduled.reverse();
+
+                for b in &to_be_scheduled {
+                    error!(
+                        "to_be_scheduled {} due to unknown results",
+                        b.header_signature[..8].to_string()
+                    );
+                }
 
                 for block in self.schedule(to_be_scheduled) {
                     if !ready.contains(&block) {
@@ -177,6 +194,7 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
         ready
     }
 
+    //external check already checkded if pred is pending or processing
     fn block_validity(&self, block_id: &str) -> BlockStatus {
         let status = self.block_status_store.status(block_id);
         if status == BlockStatus::Unknown {

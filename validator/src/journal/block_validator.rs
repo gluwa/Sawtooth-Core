@@ -336,6 +336,7 @@ where
         tx.clone()
     }
 
+    //from the chain controller lead by the, consensus request
     pub fn submit_blocks_for_verification(
         &self,
         blocks: &[Block],
