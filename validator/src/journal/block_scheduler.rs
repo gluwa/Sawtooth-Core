@@ -141,10 +141,11 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
 
                 let mut to_be_scheduled = vec![];
                 for predecessor in blocks_previous_to_previous {
-                    if self
-                        .block_status_store
-                        .status(&predecessor.header_signature)
-                        != BlockStatus::Unknown
+                    if self.contains(&predecessor.header_signature)
+                        || self
+                            .block_status_store
+                            .status(&predecessor.header_signature)
+                            != BlockStatus::Unknown
                     {
                         break;
                     }
