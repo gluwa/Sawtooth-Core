@@ -349,27 +349,42 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         }
     }
 
+    //fetch results from cache, check if invalidation or check if committed, else None.
     pub fn block_validation_result(&self, block_id: &str) -> Option<BlockValidationResult> {
-        self.block_validation_results.get(block_id).or_else(|| {
-            if self
-                .state
-                .read()
-                .expect("Unable to acquire read lock, due to poisoning")
-                .chain_reader
-                .get_block_by_block_id(block_id)
-                .expect("ChainReader errored reading from the database")
-                .is_some()
-            {
-                let result = BlockValidationResult {
-                    block_id: block_id.into(),
-                    execution_results: vec![],
-                    num_transactions: 0,
-                    status: BlockStatus::Valid,
-                };
-                return Some(result);
-            }
-            None
-        })
+        self.block_validation_results
+            .get(block_id)
+            .or_else(|| {
+                if self.block_validator.has_block(block_id) {
+                    Some(BlockValidationResult {
+                        block_id: block_id.into(),
+                        execution_results: vec![],
+                        num_transactions: 0,
+                        status: BlockStatus::InValidation,
+                    })
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                if self
+                    .state
+                    .read()
+                    .expect("Unable to acquire read lock, due to poisoning")
+                    .chain_reader
+                    .get_block_by_block_id(block_id)
+                    .expect("ChainReader errored reading from the database")
+                    .is_some()
+                {
+                    let result = BlockValidationResult {
+                        block_id: block_id.into(),
+                        execution_results: vec![],
+                        num_transactions: 0,
+                        status: BlockStatus::Valid,
+                    };
+                    return Some(result);
+                }
+                None
+            })
     }
 
     /// This is used by a non-genesis journal when it has received the
@@ -547,22 +562,15 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
     }
 
     pub fn validate_block(&self, block: &Block) {
-        // If there is already a result for this block, no need to validate it
+        // If there is already a result for this block or is in validation, no need to validate it
         if self
             .block_validation_results
             .get(&block.header_signature)
             .is_some()
+            || self.block_validator.has_block(&block.header_signature)
         {
             return;
         }
-
-        // Create block validation result, maked as in-validation
-        self.block_validation_results.insert(BlockValidationResult {
-            block_id: block.header_signature.clone(),
-            execution_results: vec![],
-            num_transactions: 0,
-            status: BlockStatus::InValidation,
-        });
 
         // Submit for validation
         let sender = self.validation_result_sender.as_ref().expect(
