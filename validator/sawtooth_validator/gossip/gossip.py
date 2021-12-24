@@ -996,7 +996,7 @@ class ConnectionManager(InstrumentedThread):
                     block_id = "HEAD~" + \
                         str(w_head.block_num) if w_head is not None else "HEAD~0"
                     try:
-                        self._gossip.register_peer(connection_id, endpoint)
+                        self._gossip._register_peer(connection_id, endpoint)
                         self._gossip.send_block_request( block_id, connection_id)
                     except PeeringException as e:
                         LOGGER.warning('Unable to successfully peer with connection_id: %s (%s), due to %s',
