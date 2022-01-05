@@ -353,7 +353,7 @@ mod tests {
         );
 
         assert_eq!(
-            block_scheduler.done(&block_a.header_signature),
+            block_scheduler.done(&block_a.header_signature, false),
             vec![block_b.clone()],
             "Marking Block A as complete, makes Block B available"
         );
@@ -365,25 +365,25 @@ mod tests {
         );
 
         assert_eq!(
-            block_scheduler.done(&block_b.header_signature),
+            block_scheduler.done(&block_b.header_signature, false),
             vec![block_c1.clone(), block_c2.clone(), block_c3.clone()],
             "Marking Block B as complete, makes Block C1, C2, C3 available"
         );
 
         assert_eq!(
-            block_scheduler.done(&block_c2.header_signature),
+            block_scheduler.done(&block_c2.header_signature, false),
             vec![],
             "No Blocks are available"
         );
 
         assert_eq!(
-            block_scheduler.done(&block_c3.header_signature),
+            block_scheduler.done(&block_c3.header_signature, false),
             vec![],
             "No Blocks are available"
         );
 
         assert_eq!(
-            block_scheduler.done(&block_c1.header_signature),
+            block_scheduler.done(&block_c1.header_signature, false),
             vec![block_d1.clone(), block_d2.clone(), block_d3.clone()],
             "Blocks D1, D2, D3 are available"
         );
