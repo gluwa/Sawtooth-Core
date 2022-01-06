@@ -38,7 +38,7 @@ from sawtooth_validator.state.merkle import MerkleDatabase
 from sawtooth_validator.state.settings_view import SettingsViewFactory
 from sawtooth_validator.state.state_view import StateViewFactory
 from sawtooth_validator.networking.interconnect import Interconnect
-
+from sawtooth_validator.journal.block_manager import BlockManager
 
 LOGGER = logging.getLogger(__name__)
 
@@ -101,6 +101,9 @@ def verify_state(global_state_db, blockstore, bind_component, scheduler_type):
     LOGGER.info(
         "Recomputing missing state from block %s with %s scheduler",
         start_block, scheduler_type)
+
+    block_manager = BlockManager()
+    block_manager.add_commit_store(blockstore)
 
     component_thread_pool = InstrumentedThreadPoolExecutor(
         max_workers=10,
@@ -187,6 +190,12 @@ def verify_state(global_state_db, blockstore, bind_component, scheduler_type):
         PingResponseHandler(),
         component_thread_pool)
 
+    component_dispatcher.add_handler(
+        validator_pb2.Message.CLIENT_REWARD_BLOCK_LIST_REQUEST,
+        client_handlers.RewardListRequest(
+            blockstore,block_manager),
+        component_thread_pool)
+
     component_dispatcher.start()
     component_service.start()
 
@@ -263,7 +272,7 @@ def process_blocks(
                 transaction_executor=transaction_executor,
                 context_manager=context_manager,
                 batches=block.batches,
-                block_signature=block.previous_block_id)
+                previous_block_id=block.previous_block_id)
 
             if new_root != block.state_root_hash:
                 raise InvalidChainError(
