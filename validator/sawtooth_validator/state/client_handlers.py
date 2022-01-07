@@ -862,10 +862,10 @@ class RewardListRequest(_ClientRequestHandler):
             padding = head_block.block_num - b
 
             assert(0 < a)
-            assert(0 < delta)
+            assert(0 <= delta)
             assert(0 < padding)
-            INTERVAL_LIMIT = 20
-            assert(delta < INTERVAL_LIMIT)
+            # INTERVAL_LIMIT = 20
+            # assert(delta < INTERVAL_LIMIT)
             DEPTH_LIMIT = 10000
             #assert(padding < DEPTH_LIMIT)
             if DEPTH_LIMIT < padding:
