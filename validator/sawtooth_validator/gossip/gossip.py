@@ -243,6 +243,7 @@ class Gossip:
                              peer in self._peers.items() if peer == endpoint]
         for id_ in stale_connections:
             self._unregister_peer(id_)
+            self._topology._remove_temporary_connection(id_)
             LOGGER.debug(
                 "Abandoned peer {} ({}) removed.".format(id_[:8], endpoint))
 
@@ -267,7 +268,9 @@ class Gossip:
         Note: Needs sync [ConnectionManager lock]
         """
         with self._lock:
-            self._try_remove_abandoned_peers(endpoint)
+            if self._try_remove_abandoned_peers(endpoint):
+                raise PeeringException(
+                    "Peer rejected. {} ({}) is already connected.".format(connection_id[:8], endpoint))
             if len(self._peers) < self._maximum_peer_connectivity:
                 self._peers[connection_id] = endpoint
                 self._topology.set_connection_status(
