@@ -15,7 +15,7 @@
  * ------------------------------------------------------------------------------
  */
 
-use crate::{block::Block, scheduler::Scheduler};
+use crate::scheduler::Scheduler;
 
 /// The logical state hash before state has been added to the
 /// merkle database. May not be the actual first state hash due to

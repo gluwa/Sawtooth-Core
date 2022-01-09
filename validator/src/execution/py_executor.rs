@@ -15,9 +15,8 @@
  * ------------------------------------------------------------------------------
  */
 
-use cpython::{ObjectProtocol, PyClone, PyDict};
+use cpython::{ObjectProtocol, PyClone};
 
-use crate::block::Block;
 use crate::execution::execution_platform::ExecutionPlatform;
 
 use crate::scheduler::py_scheduler::PyScheduler;
