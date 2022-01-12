@@ -19,6 +19,7 @@ import os
 import signal
 import time
 import threading
+import sys
 
 from sawtooth_validator.concurrent.threadpool import \
     InstrumentedThreadPoolExecutor
@@ -509,7 +510,11 @@ class Validator:
         # a sys.exit() or exit of main().
         threads.remove(threading.current_thread())
 
-        while threads:
+        join_start = time.time()
+        timed_out = False
+        THREAD_EXIT_TIMEOUT = 10
+        # try to join running threads for a maximum of 10 seconds, then time out
+        while threads and not timed_out:
             if len(threads) < 4:
                 LOGGER.info(
                     "remaining threads: %s",
@@ -517,13 +522,20 @@ class Validator:
                         ["{} ({})".format(x.name, x.__class__.__name__)
                          for x in threads]))
             for t in threads.copy():
+                if time.time() - join_start > THREAD_EXIT_TIMEOUT:
+                    timed_out = True
+                    break
                 if not t.is_alive():
                     t.join()
                     threads.remove(t)
                 if threads:
                     time.sleep(1)
-
-        LOGGER.info("All threads have been stopped and joined")
+        
+        if timed_out:
+            LOGGER.info('Timed out waiting for threads to stop, exiting forcefully')
+            sys.exit()
+        else:
+            LOGGER.info("All threads have been stopped and joined")
 
     def has_batch(self, batch_id):
         if self._block_publisher.has_batch(batch_id):
