@@ -527,9 +527,9 @@ class TransactionExecutor:
         with self._lock:
             self._alive_threads.append(t)
 
-    def stop(self):
+    def stop(self, wait=True):
         self._cancel_threads()
-        self._executing_threadpool.shutdown(wait=True)
+        self._executing_threadpool.shutdown(wait=wait)
 
 
 class InvalidTransactionObserver(metaclass=abc.ABCMeta):
