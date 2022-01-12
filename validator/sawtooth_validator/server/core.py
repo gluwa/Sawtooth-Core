@@ -453,7 +453,7 @@ class Validator:
             self._start()
 
     class RebootException(Exception):
-        ...
+        pass
 
     def _start(self):
         self._consensus_dispatcher.start()
