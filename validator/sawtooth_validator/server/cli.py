@@ -294,6 +294,7 @@ def main(args):
         network_thread_pool_workers=network_workers,
         signature_thread_pool_workers=sig_workers)
 
+    wait_on_exit = True
     # pylint: disable=broad-except
     try:
         validator.start()
@@ -306,10 +307,13 @@ def main(args):
     except GenesisError as genesis_err:
         LOGGER.error(str(genesis_err))
         sys.exit(1)
+    except Validator.RebootException:
+        LOGGER.debug('Received reboot exception, attempting exit without waiting')
+        wait_on_exit = False
     except Exception as e:
         LOGGER.exception(e)
         sys.exit(1)
     finally:
         if metrics_reporter:
             metrics_reporter.stop()
-        validator.stop()
+        validator.stop(wait=wait_on_exit)
