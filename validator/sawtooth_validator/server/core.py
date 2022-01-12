@@ -452,6 +452,9 @@ class Validator:
         else:
             self._start()
 
+    class RebootException(Exception):
+        ...
+
     def _start(self):
         self._consensus_dispatcher.start()
         self._consensus_service.start()
@@ -465,12 +468,16 @@ class Validator:
 
         self._completer.set_on_batch_received(self._incoming_batch_sender.send)
         signal_event = threading.Event()
+        force_reset = threading.Event()
+        self._gossip._topology._exit = force_reset
 
         signal.signal(signal.SIGTERM,
                       lambda sig, fr: signal_event.set())
         # This is where the main thread will be during the bulk of the
         # validator's life.
-        while not signal_event.is_set():
+        while not signal_event.is_set() or force_reset.is_set():
+            if force_reset.is_set():
+                raise self.RebootException()
             signal_event.wait(timeout=20)
 
     def stop(self):
