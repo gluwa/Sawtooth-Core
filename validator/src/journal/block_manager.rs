@@ -269,7 +269,7 @@ impl BlockManagerState {
                 blocks_not_added_yet.push(block);
             }
         }
-        if let Some((last_block, blocks_with_references)) = blocks_not_added_yet.split_last() {
+        if let Some((last_block, blocks_without_references)) = blocks_not_added_yet.split_last() {
             references_by_block_id.insert(
                 last_block.header_signature.clone(),
                 RefCount::new_unreffed_block(
@@ -279,7 +279,7 @@ impl BlockManagerState {
             );
             block_by_block_id.insert(last_block.header_signature.clone(), last_block.clone());
 
-            blocks_with_references.iter().for_each(|block| {
+            blocks_without_references.iter().for_each(|block| {
                 block_by_block_id.insert(block.header_signature.clone(), block.clone());
 
                 references_by_block_id.insert(
@@ -357,15 +357,17 @@ impl BlockManagerState {
 
         let block = blockstore_by_name
             .iter()
-            .filter_map(|(_, store)| {
-                store
+            .filter_map(|(name, store)| {
+                let block = store
                     .get(&[block_id])
                     .expect("Failed to get from blockstore")
-                    .next()
+                    .next();
+                block.map(|b| (name.clone(), b))
             })
             .next();
 
-        if let Some(block) = block {
+        if let Some((_store_name, block)) = block {
+            // in case the block_store name is needed
             let mut rc = RefCount::new_reffed_block(
                 block.header_signature.clone(),
                 block.previous_block_id.clone(),

@@ -83,7 +83,11 @@ impl BlockValidationResultStore {
             .cloned()
     }
 
+    /*
     pub fn fail_block(&self, block_id: &str) {
+        //needs to change, the cache is for valid results only.
+        //this method needs to disappear, instead update the ref object or better yet,
+        // call the results pipeline with invalid results.
         let mut cache = self
             .validation_result_cache
             .lock()
@@ -99,6 +103,7 @@ impl BlockValidationResultStore {
             });
         }
     }
+    */
 }
 
 impl BlockStatusStore for BlockValidationResultStore {
@@ -168,8 +173,9 @@ impl BlockValidationResult {
     }
 }
 
-type InternalSender = Sender<(Block, Sender<BlockValidationResult>)>;
-type InternalReceiver = Receiver<(Block, Sender<BlockValidationResult>)>;
+type Results = BlockValidationResult;
+type InternalSender = Sender<(Block, Sender<Results>)>;
+type InternalReceiver = Receiver<(Block, Sender<Results>)>;
 
 pub struct BlockValidator<TEP: ExecutionPlatform, PV: PermissionVerifier> {
     channels: Vec<(InternalSender, Option<InternalReceiver>)>,
@@ -214,14 +220,24 @@ where
         }
     }
 
+    ///only meant to be called from the chain controller::fail_block
+    pub fn processing_insert(&self, block_id: String) {
+        self.block_scheduler.insert_into_processing(block_id);
+    }
+
+    ///For scheduler use only
+    pub fn set_scheduler_results_sender(&self, sender: Sender<Results>) {
+        self.block_scheduler.set_results_sender(sender);
+    }
+
     pub fn stop(&self) {
         self.validation_thread_exit.store(true, Ordering::Relaxed);
     }
 
     fn setup_thread(
         &self,
-        rcv: Receiver<(Block, Sender<BlockValidationResult>)>,
-        error_return_sender: Sender<(Block, Sender<BlockValidationResult>)>,
+        rcv: Receiver<(Block, Sender<Results>)>,
+        error_return_sender: Sender<(Block, Sender<Results>)>,
     ) {
         let backgroundthread = thread::Builder::new();
 
@@ -335,7 +351,7 @@ where
     pub fn submit_blocks_for_verification(
         &self,
         blocks: &[Block],
-        response_sender: &Sender<BlockValidationResult>,
+        response_sender: &Sender<Results>,
     ) {
         for block in self.block_scheduler.schedule(blocks.to_vec()) {
             let tx = self.return_sender();
@@ -349,7 +365,7 @@ where
     pub fn process_pending(
         &self,
         block: &Block,
-        response_sender: &Sender<BlockValidationResult>,
+        response_sender: &Sender<Results>,
         mark_descendants_invalid: bool,
     ) {
         let pending_descendants_marked_for_processing = self
@@ -361,6 +377,32 @@ where
                 if let Err(err) = tx.send((block, response_sender.clone())) {
                     warn!("During process pending: {:?}", err);
                     self.validation_thread_exit.store(true, Ordering::Relaxed);
+                }
+            }
+        } else {
+            for desc in pending_descendants_marked_for_processing {
+                match response_sender.send(BlockValidationResult {
+                    block_id: desc.header_signature.clone(),
+                    execution_results: vec![],
+                    num_transactions: 0,
+                    status: BlockStatus::Invalid,
+                }) {
+                    Ok(..) => {
+                        info!(
+                            "Block found invalid {}; marking descendant {} invalid",
+                            &block.header_signature[..8],
+                            &desc.header_signature[..8]
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            "During descendants invalidation; Block {} err: {:?}",
+                            &desc.header_signature[..8],
+                            err
+                        );
+                        self.validation_thread_exit.store(true, Ordering::Relaxed);
+                        break;
+                    }
                 }
             }
         }
@@ -387,8 +429,8 @@ where
             state_validation,
         );
 
-        let result = block_validations.validate_block(block)?;
-        self.block_status_store.insert(result);
+        let results = block_validations.validate_block(block)?;
+        self.block_status_store.insert(results);
 
         Ok(())
     }
@@ -443,13 +485,13 @@ trait BlockValidation: Send {
     ) -> Result<Self::ReturnValue, ValidationError>;
 }
 
-struct BlockValidationProcessor<SBV: BlockValidation<ReturnValue = BlockValidationResult>> {
+struct BlockValidationProcessor<SBV: BlockValidation<ReturnValue = Results>> {
     block_manager: BlockManager,
     validations: Vec<Box<dyn BlockValidation<ReturnValue = ()>>>,
     state_validation: SBV,
 }
 
-impl<SBV: BlockValidation<ReturnValue = BlockValidationResult>> BlockValidationProcessor<SBV> {
+impl<SBV: BlockValidation<ReturnValue = Results>> BlockValidationProcessor<SBV> {
     fn new(
         block_manager: BlockManager,
         validations: Vec<Box<dyn BlockValidation<ReturnValue = ()>>>,
@@ -462,7 +504,7 @@ impl<SBV: BlockValidation<ReturnValue = BlockValidationResult>> BlockValidationP
         }
     }
 
-    fn validate_block(&self, block: &Block) -> Result<BlockValidationResult, ValidationError> {
+    fn validate_block(&self, block: &Block) -> Result<SBV::ReturnValue, ValidationError> {
         let previous_blocks_state_hash = self
             .block_manager
             .get(&[&block.previous_block_id])
@@ -497,13 +539,13 @@ impl<TEP: ExecutionPlatform> BatchesInBlockValidation<TEP> {
 }
 
 impl<TEP: ExecutionPlatform> BlockValidation for BatchesInBlockValidation<TEP> {
-    type ReturnValue = BlockValidationResult;
+    type ReturnValue = Results;
 
     fn validate_block(
         &self,
         block: &Block,
         previous_state_root: Option<&String>,
-    ) -> Result<BlockValidationResult, ValidationError> {
+    ) -> Result<Self::ReturnValue, ValidationError> {
         let ending_state_hash = &block.state_root_hash;
         let null_state_hash = NULL_STATE_HASH.into();
         let state_root = previous_state_root.unwrap_or(&null_state_hash);
