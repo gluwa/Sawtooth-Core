@@ -16,10 +16,11 @@
  */
 
 use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use crate::block::Block;
-use crate::journal::block_validator::BlockStatusStore;
+use crate::journal::block_validator::{BlockStatusStore, BlockValidationResult};
 use crate::journal::block_wrapper::BlockStatus;
 use crate::journal::chain::COMMIT_STORE;
 use crate::journal::{block_manager::BlockManager, NULL_BLOCK_IDENTIFIER};
@@ -38,6 +39,16 @@ pub struct BlockScheduler<B: BlockStatusStore> {
 }
 
 impl<B: BlockStatusStore> BlockScheduler<B> {
+    //call from chain::fail_block
+    ///only meant to be called from the chain controller.
+    pub fn insert_into_processing(&self, block_id: String) {
+        self.state
+            .lock()
+            .expect("The BlockScheduler Mutex was poisoned")
+            .processing
+            .insert(block_id);
+    }
+
     pub fn new(block_manager: BlockManager, block_status_store: B) -> Self {
         BlockScheduler {
             state: Arc::new(Mutex::new(BlockSchedulerState {
@@ -46,8 +57,16 @@ impl<B: BlockStatusStore> BlockScheduler<B> {
                 pending: HashSet::new(),
                 processing: HashSet::new(),
                 descendants_by_previous_id: HashMap::new(),
+                results_sender: None,
             })),
         }
+    }
+
+    pub fn set_results_sender(&self, sender: Sender<BlockValidationResult>) {
+        self.state
+            .lock()
+            .expect("The BlockScheduler Mutex was poisoned")
+            .results_sender = Some(sender);
     }
 
     /// Schedule the blocks, returning those that are directly ready to
@@ -84,6 +103,7 @@ struct BlockSchedulerState<B: BlockStatusStore> {
     pub pending: HashSet<String>,
     pub processing: HashSet<String>,
     pub descendants_by_previous_id: HashMap<String, Vec<Block>>,
+    results_sender: Option<Sender<BlockValidationResult>>,
 }
 
 impl<B: BlockStatusStore> BlockSchedulerState<B> {
@@ -125,55 +145,97 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
                 continue;
             }
 
-            //block and pred are not in validation
-            if block.previous_block_id != NULL_BLOCK_IDENTIFIER
-            //results not found though
-                && self.block_validity(&block.previous_block_id) == BlockStatus::Unknown
-            {
-                info!(
+            //up to this point block and pred are not in validation
+            if block.previous_block_id == NULL_BLOCK_IDENTIFIER {
+                debug!("Adding block {} for processing", &block.header_signature);
+                self.processing.insert(block.header_signature.clone());
+                ready.push(block);
+                return ready;
+            }
+
+            let prev_block_validity = self.block_validity(&block.previous_block_id);
+
+            match prev_block_validity {
+                BlockStatus::Valid => {
+                    debug!("Adding block {} for processing", &block.header_signature);
+
+                    self.processing.insert(block.header_signature.clone());
+                    ready.push(block);
+                }
+                // pred results not found though
+                BlockStatus::Unknown => {
+                    info!(
                     "During block scheduling, predecessor of block {}, {}, status is unknown. Scheduling all blocks since last predecessor with known status",
                     &block.header_signature, &block.previous_block_id);
 
-                let blocks_previous_to_previous = self.block_manager
+                    let blocks_previous_to_previous = self.block_manager
                         .branch(&block.previous_block_id)
                         .expect("Block id of block previous to block being scheduled is unknown to the block manager");
-                self.add_block_to_pending(block);
+                    self.add_block_to_pending(block);
 
-                let mut to_be_scheduled = vec![];
-                for predecessor in blocks_previous_to_previous {
-                    if self.contains(&predecessor.header_signature)
-                        || self
+                    let mut to_be_scheduled = vec![];
+                    for predecessor in blocks_previous_to_previous {
+                        let cache_status = self
                             .block_status_store
-                            .status(&predecessor.header_signature)
-                            != BlockStatus::Unknown
-                    {
-                        break;
-                    }
-                    match self.block_manager.ref_block(&predecessor.header_signature) {
-                        Ok(_) => (),
-                        Err(err) => {
-                            warn!(
+                            .status(&predecessor.header_signature);
+
+                        //proxy for is_in_validation
+                        if self.contains(&predecessor.header_signature)
+                            || cache_status != BlockStatus::Unknown
+                        {
+                            break;
+                        }
+
+                        match self.block_manager.ref_block(&predecessor.header_signature) {
+                            Ok(_) => (),
+                            Err(err) => {
+                                warn!(
                                 "Failed to ref block {} during cache-miss block rescheduling: {:?}",
                                 &predecessor.header_signature, err
                             );
+                            }
+                        }
+
+                        to_be_scheduled.push(predecessor);
+                    }
+
+                    to_be_scheduled.reverse();
+
+                    for block in self.schedule(to_be_scheduled) {
+                        if !ready.contains(&block) {
+                            self.processing.insert(block.header_signature.clone());
+                            ready.push(block);
                         }
                     }
-                    to_be_scheduled.push(predecessor);
                 }
+                BlockStatus::Invalid => {
+                    //readily send invalid results to results thread
+                    //insert in processing, so that it gets descheduled and its descendants,
+                    //descendants must be inserted so that they can be descheduled; handled by recursive schedule
+                    self.processing.insert(block.header_signature.clone());
+                    self.results_sender.as_ref()
+                        .expect("Results' tx is not supposed to be None")
+                        .send(BlockValidationResult {
+                            block_id: block.header_signature.clone(),
+                            execution_results: vec![],
+                            num_transactions: 0,
+                            status: BlockStatus::Invalid,
+                        })
+                        .expect("Failed to send invalid block to results thread in the chain controller");
 
-                to_be_scheduled.reverse();
-
-                for block in self.schedule(to_be_scheduled) {
-                    if !ready.contains(&block) {
-                        self.processing.insert(block.header_signature.clone());
-                        ready.push(block);
-                    }
+                    debug!(
+                        "Block {} has invalid predecessor {}, propagating invalidation",
+                        &block.header_signature, &block.previous_block_id
+                    );
                 }
-            } else {
-                debug!("Adding block {} for processing", &block.header_signature);
-
-                self.processing.insert(block.header_signature.clone());
-                ready.push(block);
+                BlockStatus::Missing | BlockStatus::InValidation => {
+                    warn!(
+                        "Block {} has unreachable predecessor {} status {:?}, not scheduling",
+                        &block.header_signature,
+                        &block.previous_block_id[..8],
+                        &prev_block_validity
+                    );
+                }
             }
         }
         self.update_gauges();

@@ -282,7 +282,8 @@ pub struct ChainController<TEP: ExecutionPlatform + Clone, PV: PermissionVerifie
     // Queues
     block_queue_sender: Option<Sender<String>>,
     commit_queue_sender: Option<Sender<Block>>,
-    validation_result_sender: Option<Sender<BlockValidationResult>>,
+    //only to pass it to the scheduler
+    pub validation_result_sender: Option<Sender<BlockValidationResult>>,
 
     state_pruning_block_depth: u32,
     chain_head_lock: ChainHeadLock,
@@ -334,6 +335,12 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         chain_controller.initialize_chain_head();
 
         chain_controller
+    }
+
+    //for scheduler use only
+    pub fn set_scheduler_results_sender(&self) {
+        self.block_validator
+            .set_scheduler_results_sender(self.validation_result_sender.clone().unwrap());
     }
 
     pub fn chain_head(&self) -> Option<Block> {
@@ -597,22 +604,26 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
     }
 
     pub fn fail_block(&self, block: &Block) {
-        let mut state = self
-            .state
-            .write()
-            .expect("No lock holder should have poisoned the lock");
+        //Consider it in-validation until the results are handled.
+        self.block_validator
+            .processing_insert(block.header_signature.clone());
+        //send through results processor
+        let sender = self
+            .validation_result_sender
+            .as_ref()
+            .expect("Unable to ref validation_result_sender");
 
-        // Drop Ref-C: Consensus is not interested in this block anymore
-        match state.block_references.remove(&block.header_signature) {
-            Some(_) => {
-                self.block_validation_results
-                    .fail_block(&block.header_signature);
-                info!("Failed block {}", block);
-            }
-            None => debug!(
-                "Could not fail block {}; consensus has already decided on it",
-                &block.header_signature
-            ),
+        if let Err(e) = sender.send(BlockValidationResult {
+            block_id: block.header_signature.clone(),
+            execution_results: vec![],
+            num_transactions: 0,
+            status: BlockStatus::Invalid,
+        }) {
+            warn!(
+                "Block {} results sender failure: {:?}, consensus' fail request was not delivered.",
+                &block.header_signature[..8],
+                e
+            );
         }
     }
 
@@ -1022,6 +1033,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
 
             self.block_queue_sender = Some(block_queue_sender);
             self.validation_result_sender = Some(validation_result_sender);
+            self.set_scheduler_results_sender();
             self.commit_queue_sender = Some(commit_queue_sender);
 
             let thread_chain_controller = self.light_clone();
@@ -1056,39 +1068,40 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         let result_thread_builder =
             thread::Builder::new().name("ChainThread:ValidationResultReceiver".into());
         let result_thread_controller = self.light_clone();
-        result_thread_builder
-            .spawn(move || loop {
-                let block_validation_result = match validation_result_receiver
-                    .recv_timeout(Duration::from_millis(RECV_TIMEOUT_MILLIS))
-                {
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        if result_thread_exit.load(Ordering::Relaxed) {
-                            break;
-                        } else {
-                            continue;
-                        }
-                    }
-                    Err(_) => {
-                        error!("Result queue shutdown unexpectedly");
+        let f = move || loop {
+            let block_validation_result = match validation_result_receiver
+                .recv_timeout(Duration::from_millis(RECV_TIMEOUT_MILLIS))
+            {
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if result_thread_exit.load(Ordering::Relaxed) {
                         break;
+                    } else {
+                        continue;
                     }
-                    Ok(res) => res,
-                };
-
-                if !result_thread_exit.load(Ordering::Relaxed) {
-                    result_thread_controller
-                        .set_block_validation_result(block_validation_result.clone());
-                    if let Some(block) = result_thread_controller
-                        .get_block(&block_validation_result.block_id) {
-                            result_thread_controller.on_block_validated(&block, &block_validation_result);
-                        } else {
-                            error!("During validation result thread loop, received a block validation result for a block that is not in the BlockManager");
-                        }
-
-                } else {
+                }
+                Err(_) => {
+                    error!("Result queue shutdown unexpectedly");
                     break;
                 }
-            }).unwrap();
+                Ok(res) => res,
+            };
+
+            if result_thread_exit.load(Ordering::Relaxed) {
+                break;
+            }
+
+            result_thread_controller.set_block_validation_result(block_validation_result.clone());
+
+            if let Some(block) =
+                result_thread_controller.get_block(&block_validation_result.block_id)
+            {
+                result_thread_controller.on_block_validated(&block, &block_validation_result);
+            } else {
+                error!("During validation result thread loop, received a block validation result for a block that is not in the BlockManager");
+            }
+        };
+
+        result_thread_builder.spawn(f).unwrap();
     }
 
     fn start_commit_queue_thread(
