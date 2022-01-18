@@ -124,7 +124,7 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
             }
 
             if block.previous_block_id != NULL_BLOCK_IDENTIFIER
-                && self.block_validity(&block.previous_block_id) == BlockStatus::Unknown
+                && self.block_validity(&block.previous_block_id, block.block_num) == BlockStatus::Unknown
             {
                 info!(
                     "During block scheduling, predecessor of block {}, {}, status is unknown. Scheduling all blocks since last predecessor with known status",
@@ -175,8 +175,12 @@ impl<B: BlockStatusStore> BlockSchedulerState<B> {
         ready
     }
 
-    fn block_validity(&self, block_id: &str) -> BlockStatus {
-        let status = self.block_status_store.status(block_id);
+    fn block_validity(&self, block_id: &str, block_num: u64) -> BlockStatus {
+        let mut status = self.block_status_store.status(block_id);
+        if block_num >= 5 && block_num <= 10 {
+            debug!("****** MARKING BLOCK {} as invalid", block_num);
+            status = BlockStatus::Invalid
+        }
         if status == BlockStatus::Unknown {
             match self
                 .block_manager
