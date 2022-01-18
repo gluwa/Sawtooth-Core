@@ -104,6 +104,12 @@ jobs:
             done
         done
 
+        # bring the dependencies up & down b/c they have a shared directory
+        echo "INFO: Up & Down"
+        docker-compose -f docker/compose/sawtooth-build.yaml up
+        docker-compose -f docker/compose/sawtooth-build.yaml down
+
+
         echo "INFO: Docker images under test"
         docker images
 
