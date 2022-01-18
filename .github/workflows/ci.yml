@@ -89,32 +89,44 @@ jobs:
         python --version
         pip install yq
 
-        # build services one by one instead of
-        # docker-compose -f docker/compose/sawtooth-build.yaml build
-        # because we run out of disk space in GitHub
-        for SERVICE in $(cat docker/compose/sawtooth-build.yaml | ~/.local/bin/yq -r '.services | keys' -y | sed 's/- //'); do
-            echo "INFO: Will build $SERVICE"
+        # build services one by one to avoid running out of disk space in GitHub
+        function buildImages() {
+            YAML_FILE=$1
 
-            docker-compose -f docker/compose/sawtooth-build.yaml build $SERVICE
+            for SERVICE in $(cat $YAML_FILE | ~/.local/bin/yq -r '.services | keys' -y | sed 's/- //'); do
+                echo "INFO: Will build $SERVICE"
 
-            # remove intermediary images
-            for IMAGE in $(docker images | grep "<none>" | tr -s ' ' | cut -f3 -d ' '); do
-                echo "INFO: Removing intermediary image $IMAGE"
-                docker rmi $IMAGE
+                docker-compose -f $YAML_FILE build $SERVICE
+
+                # remove intermediary images
+                for IMAGE in $(docker images | grep "<none>" | tr -s ' ' | cut -f3 -d ' '); do
+                    echo "INFO: Removing intermediary image $IMAGE"
+                    docker rmi $IMAGE
+                done
             done
-        done
+        }
+
+        buildImages "docker/compose/sawtooth-build.yaml"
 
         # bring the dependencies up & down b/c they have a shared directory
         echo "INFO: Up & Down"
         docker-compose -f docker/compose/sawtooth-build.yaml up
         docker-compose -f docker/compose/sawtooth-build.yaml down
 
-
+        echo "******************************"
+        echo
+        echo
         echo "INFO: Docker images under test"
+        echo
         docker images
+        echo
+        echo
+        echo "******************************"
 
     - name: Run Tests
       run: |
+        # note: deployment tests need the runtime containers
+        # while the other tests build with a -local suffix
         INSTALL_TYPE="" ./bin/run_tests
 
 
@@ -131,3 +143,16 @@ jobs:
     - name: Build ${{ matrix.container }}
       run: |
         docker-compose -f docker-compose-installed.yaml build ${{ matrix.toolchain }}
+
+        # NOTE: this will not work with a matrix build
+        # these are runtime dependencies, should not be needed for running
+        # the automated testsuite
+        # buildImages "docker-compose-installed.yaml"
+
+        # Grafana, InfluxDB & Apache proxy
+        # probably not needed
+        # buildImages "docker/compose/external.yaml"
+
+    # - name: Run Tests
+    #  run: |
+    #    INSTALL_TYPE="" ./bin/run_tests -m deployment
