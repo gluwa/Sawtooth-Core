@@ -148,13 +148,21 @@ class TransactionExecutorThread:
                 for addr in state_deletes
             ]
 
-            self._scheduler.set_transaction_execution_result(
-                txn_signature=req.signature,
-                is_valid=True,
-                context_id=req.context_id,
-                state_changes=state_changes,
-                events=events,
-                data=data)
+            try:
+                self._scheduler.set_transaction_execution_result(
+                    txn_signature=req.signature,
+                    is_valid=True,
+                    context_id=req.context_id,
+                    state_changes=state_changes,
+                    events=events,
+                    data=data)
+            except KeyError:
+                LOGGER.error("req: %s \n resp %s \n "
+                             "sets %s \n dels %s \n events %s \n data %s \n", req, response,
+                             state_sets, state_deletes, events, data)
+
+            # try:
+            # except KeyError:
 
         elif response.status == processor_pb2.TpProcessResponse.INTERNAL_ERROR:
             LOGGER.error(
@@ -419,12 +427,12 @@ class TransactionExecutor:
                  invalid_observers=None):
         """
         Args:
-            service (Interconnect): The zmq internal interface
-            context_manager (ContextManager): Cache of state for tps
-            settings_view_factory (SettingsViewFactory): Read-only view of
+            service(Interconnect): The zmq internal interface
+            context_manager(ContextManager): Cache of state for tps
+            settings_view_factory(SettingsViewFactory): Read-only view of
                 setting state.
         Attributes:
-            processor_manager (ProcessorManager): All of the registered
+            processor_manager(ProcessorManager): All of the registered
                 transaction processors and a way to find the next one to send
                 to.
         """
@@ -544,9 +552,9 @@ class InvalidTransactionObserver(metaclass=abc.ABCMeta):
         error message or extended data sent back.
 
         Args:
-            txn_id (str): The id of the invalid Transaction
-            message (str, optional): Message explaining why it is invalid
-            extended_data (bytes, optional): Additional error data
+            txn_id(str): The id of the invalid Transaction
+            message(str, optional): Message explaining why it is invalid
+            extended_data(bytes, optional): Additional error data
         """
         raise NotImplementedError('InvalidTransactionObservers must have a '
                                   '"notify_txn_invalid" method')
