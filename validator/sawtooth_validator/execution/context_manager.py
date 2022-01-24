@@ -381,10 +381,12 @@ class ContextManager:
             while contexts_in_chain:
                 current_c_id = contexts_in_chain.popleft()
                 current_context = self._contexts[current_c_id]
+                LOGGER.error("current_context: %s", current_context)
                 if not current_context.is_read_only():
                     current_context.make_read_only()
 
                 addresses_w_values = current_context.get_all_if_set()
+                LOGGER.error("context sets: %s", addresses_w_values)
                 for add, val in addresses_w_values.items():
                     # Since we are moving backwards through the graph of
                     # contexts, only update if the address hasn't been set
@@ -392,7 +394,9 @@ class ContextManager:
                     if add not in updates and add not in deletes:
                         updates[add] = val
 
+                # swap for blocks <->
                 addresses_w_values = current_context.get_all_if_deleted()
+                LOGGER.error("context dels: %s", addresses_w_values)
                 for add, _ in addresses_w_values.items():
                     # Since we are moving backwards through the graph of
                     # contexts, only add to deletes if the address hasn't been
@@ -403,12 +407,17 @@ class ContextManager:
                 for c_id in current_context.base_contexts:
                     if c_id not in context_ids_already_searched:
                         contexts_in_chain.append(c_id)
+                        LOGGER.error("Context %s scheduling ctx %s",
+                                     current_context, c_id)
                         context_ids_already_searched.append(c_id)
 
             tree = MerkleDatabase(self._database, state_root)
 
             # filter the delete list to just those items in the tree
             deletes = [addr for addr in deletes if addr in tree]
+
+            LOGGER.error("state delta sets: %s", updates)
+            LOGGER.error("state delta dels: %s", deletes)
 
             if not updates and not deletes:
                 state_hash = state_root

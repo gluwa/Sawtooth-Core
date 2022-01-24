@@ -549,6 +549,7 @@ impl<TEP: ExecutionPlatform> BlockValidation for BatchesInBlockValidation<TEP> {
         block: &Block,
         previous_state_root: Option<&String>,
     ) -> Result<Self::ReturnValue, ValidationError> {
+        error!("debugging Block {:?}", &block);
         let ending_state_hash = &block.state_root_hash;
         let null_state_hash = NULL_STATE_HASH.into();
         let state_root = previous_state_root.unwrap_or(&null_state_hash);
