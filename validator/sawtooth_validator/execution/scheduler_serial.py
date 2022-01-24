@@ -70,7 +70,7 @@ class SerialScheduler(Scheduler):
         self._already_calculated = False
         self._always_persist = always_persist
         self._block_signature = block_signature
-    
+
     @property
     def block_signature(self):
         return self._block_signature
@@ -119,6 +119,7 @@ class SerialScheduler(Scheduler):
                 if batch_signature not in self._batch_statuses:
                     # because of the else clause above, txn is valid here
                     self._previous_valid_batch_c_id = self._previous_context_id
+                    LOGGER.error("Computing SRH for batch %s", batch_signature)
                     state_hash = self._calculate_state_root_if_required(
                         batch_id=batch_signature)
                     self._batch_statuses[batch_signature] = \
@@ -345,8 +346,7 @@ class SerialScheduler(Scheduler):
 
         state_hash = None
         if self._previous_valid_batch_c_id is not None:
-            publishing_or_genesis = self._always_persist or \
-                required_state_root is None
+            publishing_or_genesis = self._always_persist or required_state_root is None
             state_hash = self._squash(
                 state_root=self._previous_state_hash,
                 context_ids=[self._previous_valid_batch_c_id],
@@ -382,6 +382,7 @@ class SerialScheduler(Scheduler):
             batch_id)
         state_hash = None
         if required_state_hash is not None:
+            # get into
             state_hash = self._compute_merkle_root(required_state_hash)
             self._already_calculated = True
         return state_hash
@@ -391,6 +392,9 @@ class SerialScheduler(Scheduler):
             len(self._txn_results) == len(self._txn_to_batch)
 
     def complete(self, block):
+        """
+        block: bool
+        """
         with self._condition:
             if not self._final:
                 return False
