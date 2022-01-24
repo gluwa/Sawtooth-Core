@@ -405,11 +405,11 @@ pub unsafe extern "C" fn merkle_db_update(
         return e;
     }
 
-    match (*(merkle_db as *mut MerkleDatabase)).update(
-        &update_map,
-        &deletes.unwrap(),
-        virtual_write,
-    ) {
+    let deletes = deletes.unwrap();
+
+    error!("sets {:?} dels {:?}", update_map, &deletes);
+
+    match (*(merkle_db as *mut MerkleDatabase)).update(&update_map, &deletes, virtual_write) {
         Ok(state_root) => {
             *merkle_root_cap = state_root.capacity();
             *merkle_root_len = state_root.len();
