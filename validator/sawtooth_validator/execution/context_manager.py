@@ -381,7 +381,7 @@ class ContextManager:
             while contexts_in_chain:
                 current_c_id = contexts_in_chain.popleft()
                 current_context = self._contexts[current_c_id]
-                LOGGER.error("current_context: %s", current_context)
+                LOGGER.error("current_context: %s", vars(current_context))
                 if not current_context.is_read_only():
                     current_context.make_read_only()
 
