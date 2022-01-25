@@ -15,6 +15,7 @@
  * ------------------------------------------------------------------------------
  */
 
+use log::error;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -223,29 +224,36 @@ impl MerkleDatabase {
     ) -> Result<String, StateDatabaseError> {
         let mut path_map = HashMap::new();
 
+        //mut arg homologues
         let mut deletions = HashSet::new();
         let mut additions = HashSet::new();
+        //build path map and fill iterables
+        {
+            for (set_address, set_value) in set_items {
+                let tokens = tokenize_address(set_address);
+                error!("sets tokens {:?} for {}", tokens, set_address);
+                let mut set_path_map = self.get_path_by_tokens(&tokens, false)?;
 
-        for (set_address, set_value) in set_items {
-            let tokens = tokenize_address(set_address);
-            let mut set_path_map = self.get_path_by_tokens(&tokens, false)?;
-
-            {
-                let node = set_path_map
-                    .get_mut(set_address)
-                    .expect("Path map not correctly generated");
-                node.value = Some(set_value.to_vec());
+                {
+                    let node = set_path_map
+                        .get_mut(set_address)
+                        .expect("Path map not correctly generated");
+                    node.value = Some(set_value.to_vec());
+                }
+                error!("Update sets map {:?}", set_path_map);
+                path_map.extend(set_path_map);
             }
-            path_map.extend(set_path_map);
-        }
-        for pkey in path_map.keys() {
-            additions.insert(pkey.clone());
-        }
+            for pkey in path_map.keys() {
+                additions.insert(pkey.clone());
+            }
 
-        for del_address in delete_items.iter() {
-            let tokens = tokenize_address(del_address);
-            let del_path_map = self.get_path_by_tokens(&tokens, true)?;
-            path_map.extend(del_path_map);
+            for del_address in delete_items.iter() {
+                let tokens = tokenize_address(del_address);
+                error!("dels tokens {:?} for {}", tokens, del_address);
+                let del_path_map = self.get_path_by_tokens(&tokens, true)?;
+                error!("Update dels map {:?}", del_path_map);
+                path_map.extend(del_path_map);
+            }
         }
 
         for del_address in delete_items.iter() {
@@ -258,11 +266,17 @@ impl MerkleDatabase {
                         .expect("Path map not correctly generated or entry is deleted");
 
                     if let Some(old_hash_key) = parent_node.children.remove(path_branch) {
+                        error!(
+                            "C1 removed hash_key {} from token {} under {}",
+                            old_hash_key, path_branch, parent_address
+                        );
                         deletions.insert(old_hash_key);
                     }
 
                     parent_node.children.is_empty()
                 };
+
+                //needs refactoring
 
                 // there's no children to the parent node already in the tree, remove it from
                 // path_map if a new node doesn't have this as its parent
@@ -284,6 +298,10 @@ impl MerkleDatabase {
                         .expect("Path map not correctly generated or entry is deleted");
 
                     if let Some(old_hash_key) = parent_node.children.remove(path_branch) {
+                        error!(
+                            "C2 removed hash_key {} from token {} under {}",
+                            old_hash_key, path_branch, parent_address
+                        );
                         deletions.insert(old_hash_key);
                     }
                 }
@@ -300,7 +318,8 @@ impl MerkleDatabase {
         for path in sorted_paths {
             let node = path_map
                 .remove(&path)
-                .expect("Path map keys are out of sink");
+                .expect("Path map keys are out of sync");
+            // does this last call cause keyvaluenot found? No
             let (hash_key, packed) = encode_and_hash(node)?;
             key_hash = hash_key.clone();
 
@@ -313,12 +332,24 @@ impl MerkleDatabase {
                     .children
                     .insert(path_branch.to_string(), ::hex::encode(hash_key.clone()))
                 {
+                    error!(
+                        "C3 removed hash_key {} from token {} under {}",
+                        old_hash_key, path_branch, parent_address
+                    );
+
+                    error!(
+                        "C3 inserting hash_key {} from token {} under {}",
+                        ::hex::encode(hash_key.clone()),
+                        path_branch,
+                        parent_address
+                    );
                     deletions.insert(old_hash_key);
                 }
             }
 
             batch.push((hash_key, packed));
         }
+        //TODO trace node hashes (children)
 
         if !is_virtual {
             let deletions: Vec<Vec<u8>> = deletions
@@ -420,10 +451,21 @@ impl MerkleDatabase {
         for token in tokens {
             let node = {
                 // this is safe to unwrap, because we've just inserted the path in the previous loop
+                //print child_address, what is it?
                 let child_address = &nodes[&path].children.get(&token.to_string());
 
                 match (!new_branch && child_address.is_some(), strict) {
-                    (true, _) => get_node_by_hash(&self.db, child_address.unwrap())?,
+                    (true, _) => {
+                        get_node_by_hash(&self.db, child_address.unwrap()).map_err(|e| {
+                            error!(
+                                "Expected child {} under path {} in token {}",
+                                child_address.unwrap(),
+                                path,
+                                token
+                            );
+                            e
+                        })?
+                    }
                     (false, true) => {
                         return Err(StateDatabaseError::NotFound(format!(
                             "invalid address {} from root {}",
@@ -717,6 +759,7 @@ fn tokenize_address(address: &str) -> Box<[&str]> {
 fn get_node_by_hash(db: &LmdbDatabase, hash: &str) -> Result<Node, StateDatabaseError> {
     match db.reader()?.get(hash.as_bytes()) {
         Some(bytes) => Node::from_bytes(&bytes),
+        //here, hex encode? Already hex
         None => Err(StateDatabaseError::NotFound(hash.to_string())),
     }
 }
