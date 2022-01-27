@@ -110,3 +110,18 @@ jobs:
     - name: Run Tests
       run: |
         INSTALL_TYPE="" ./bin/run_tests
+
+
+  build-validator-and-rest-api-containers:
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    strategy:
+      matrix:
+        container: ["rest-api", "validator"]
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Build ${{ matrix.container }}
+      run: |
+        docker-compose -f docker-compose-installed.yaml build ${{ matrix.toolchain }}
