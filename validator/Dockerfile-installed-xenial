@@ -115,3 +115,7 @@ RUN echo "deb http://repo.sawtooth.me/ubuntu/bumper/nightly xenial universe" >> 
  && apt-get update \
  && dpkg -i /tmp/python3-sawtooth-*.deb || true \
  && apt-get -f -y install
+
+RUN curl -sL https://repos.influxdata.com/influxdb.key |  sudo apt-key add - \
+    && apt-add-repository "deb https://repos.influxdata.com/ubuntu bionic stable" \
+    && apt-get install telegraf -y

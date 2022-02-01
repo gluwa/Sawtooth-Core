@@ -65,6 +65,10 @@ RUN curl https://sh.rustup.rs -sSf > /usr/bin/rustup-init \
  && chmod +x /usr/bin/rustup-init \
  && rustup-init -y
 
+RUN curl -sL https://repos.influxdata.com/influxdb.key |  sudo apt-key add - \
+    && apt-add-repository "deb https://repos.influxdata.com/ubuntu bionic stable" \
+    && apt-get install telegraf -y
+
 ENV PATH=$PATH:/project/sawtooth-core/bin:/protoc3/bin:/project/sawtooth-core/bin:/root/.cargo/bin \
     CARGO_INCREMENTAL=0
 
