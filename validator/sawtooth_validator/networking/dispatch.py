@@ -141,6 +141,7 @@ class Dispatcher(InstrumentedThread):
                            connection)
 
     def dispatch(self, connection, message, connection_id):
+        # TODO can handlers go missing
         if message.message_type in self._msg_type_handlers:
             priority = self._priority.get(message.message_type, Priority.LOW)
             message_id = _gen_message_id()
@@ -154,6 +155,9 @@ class Dispatcher(InstrumentedThread):
                     message_type=message.message_type,
                     collection=_ManagerCollection(
                         self._msg_type_handlers[message.message_type]))
+
+            LOGGER.error("dispatching %s",
+                         self._message_information[message_id])
 
             self._in_queue.put_nowait((priority, message_id))
 
@@ -273,6 +277,7 @@ class Dispatcher(InstrumentedThread):
             return
 
         timer_tag = type(handler_manager.handler).__name__
+        LOGGER.error("handler %s", timer_tag)
         timer_ctx = self._get_dispatch_timer(timer_tag).time()
 
         def do_next(result):
@@ -283,6 +288,8 @@ class Dispatcher(InstrumentedThread):
                 LOGGER.exception(
                     "Unhandled exception while determining next")
 
+        # log handler name and context
+        LOGGER.error("%s handler", vars(handler_manager))
         handler_manager.execute(
             message_info.connection_id,
             message_info.content,

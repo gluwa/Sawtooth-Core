@@ -177,9 +177,14 @@ class _SendReceive:
         return (time.time() - last_timestamp) > self._connection_timeout
 
     def _identity_to_connection_id(self, zmq_identity):
+        '''
+        Returns the connection id for the given zmq identity. Create it if necessary.
+        '''
         if zmq_identity not in self._identities_to_connection_ids:
             self._identities_to_connection_ids[zmq_identity] = \
                 hashlib.sha512(zmq_identity).hexdigest()
+            LOGGER.error("Generated conn_id %s for identity %s",
+                         self._identities_to_connection_ids[zmq_identity], zmq_identity)
 
         return self._identities_to_connection_ids[zmq_identity]
 
@@ -290,8 +295,11 @@ class _SendReceive:
             LOGGER.info("No response from %s in %s seconds"
                         " - removing connection.",
                         self._connection, elapsed)
+            # TF, do we really don't have the identity here?
             connection_id = hashlib.sha512(
                 self.connection.encode()).hexdigest()
+            LOGGER.error("Connection %s is lost, also %s",
+                         connection_id, self._connection)
             if connection_id in self._connections:
                 del self._connections[connection_id]
             yield from self._stop()
@@ -300,9 +308,13 @@ class _SendReceive:
         if zmq_identity in self._last_message_times:
             del self._last_message_times[zmq_identity]
         if zmq_identity in self._identities_to_connection_ids:
+            LOGGER.error("removing mapping identity %s conn_id %s",
+                         zmq_identity, self._identities_to_connection_ids[zmq_identity])
             del self._identities_to_connection_ids[zmq_identity]
         connection_id = self._identity_to_connection_id(zmq_identity)
+        LOGGER.error("but created new %s connection id", connection_id)
         if connection_id in self._connections:
+            LOGGER.error("removing connection %s", connection_id)
             del self._connections[connection_id]
 
     def _received_from_identity(self, zmq_identity):
@@ -315,6 +327,8 @@ class _SendReceive:
                                None,
                                None,
                                None)
+            LOGGER.error("inserting connection info %s for %s",
+                         self._connections[connection_id], connection_id)
 
     @asyncio.coroutine
     def _dispatch_message(self):
@@ -339,9 +353,11 @@ class _SendReceive:
                     connection_id = \
                         self._identity_to_connection_id(zmq_identity)
                 else:
-                    connection_id = \
-                        self._identity_to_connection_id(
-                            self._connection.encode())
+                    provisional_identity = self._connection.encode()
+                    connection_id = self._identity_to_connection_id(
+                        provisional_identity)
+                    LOGGER.error("prov identity %s and conn id %s",
+                                 provisional_identity, connection_id)
                 try:
                     self._futures.set_result(
                         message.correlation_id,
@@ -350,6 +366,11 @@ class _SendReceive:
                             content=message.content,
                             connection_id=connection_id))
                 except future.FutureCollectionKeyError:
+                    LOGGER.error(
+                        "Received message with unknown correlation_id: %s", message.correlation_id)
+                    LOGGER.error("dispatching instead conn %s %s",
+                                 connection_id, message)
+
                     self._dispatcher.dispatch(self._connection,
                                               message,
                                               connection_id)
@@ -379,10 +400,12 @@ class _SendReceive:
                         self._socket.send_multipart(
                             [bytes(zmq_identity), msg_bytes])
                     else:
+                        # update last message and create connection info if needed
                         self._received_from_identity(zmq_identity)
                         self._dispatcher_queue.put_nowait(
                             (zmq_identity, msg_bytes))
                 else:
+                    # you are a dealer (outbound connection)
                     msg_bytes = yield from self._socket.recv()
                     self._last_message_time = time.time()
                     self._dispatcher_queue.put_nowait((None, msg_bytes))
@@ -440,6 +463,7 @@ class _SendReceive:
                      self._connection,
                      get_enum_name(msg.message_type),
                      identity if identity else self._address)
+        LOGGER.error("identity %s address %s", identity, self._address)
 
         if identity is None:
             message_bundle = [msg.SerializeToString()]
@@ -450,8 +474,11 @@ class _SendReceive:
         yield from self._socket.send_multipart(message_bundle)
         if identity is None:
             if self._connection != "ServerThread":
+                LOGGER.error(
+                    "shutting down %s on send last message", self._connection)
                 self.shutdown()
         else:
+            LOGGER.error("removing identity in send last message %s", identity)
             self.remove_connected_identity(identity)
 
     def send_last_message(self, msg, connection_id=None):
@@ -888,6 +915,7 @@ class Interconnect:
                      "be allowed. num connections: %s max %s",
                      len(self._connections),
                      self._max_incoming_connections)
+        LOGGER.error("connections %s", self._connections)
         return self._max_incoming_connections >= len(self._connections)
 
     def add_outbound_connection(self, uri):
