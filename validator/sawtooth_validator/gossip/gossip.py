@@ -1023,6 +1023,15 @@ class ConnectionManager(InstrumentedThread):
             else:
                 pass
 
+    def remove_temporary_connection(self, connection_id):
+        '''
+        Used to remove temporary connections fron the gossip handlers.
+
+
+        '''
+        with self._lock:
+            self._remove_temporary_connection(connection_id)
+
     def _remove_temporary_connection(self, connection_id):
         """
         Note: Needs sync, ConnectionManager.
@@ -1103,9 +1112,10 @@ class ConnectionManager(InstrumentedThread):
         get_peers_request = GetPeersRequest()
 
         def callback(request, result):
-            # request, result are ignored, but required by the callback
-            with self._lock:
-                self._remove_temporary_connection(connection_id)
+            '''
+            it used to be a remove_connection here, but it raced with the getpeersresponse.
+            '''
+            pass
 
         try:
             self._network.send(

@@ -34,6 +34,8 @@ from sawtooth_validator.protobuf.network_pb2 import PeerUnregisterRequest
 from sawtooth_validator.protobuf.network_pb2 import NetworkAcknowledgement
 from sawtooth_validator.exceptions import PeeringException
 
+from sawtooth_validator.gossip.gossip import PeerStatus
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -72,6 +74,12 @@ class GetPeersResponseHandler(Handler):
             response.peer_endpoints)
 
         self._gossip.add_candidate_peer_endpoints(response.peer_endpoints)
+        connection_manager = self._gossip._topology
+        if connection_manager:
+            status = connection_manager.get_connection_status(connection_id)
+            if status == PeerStatus.TEMP:
+                self._gossip._topology.remove_temporary_connection(
+                    connection_id)
 
         return HandlerResult(HandlerStatus.PASS)
 
