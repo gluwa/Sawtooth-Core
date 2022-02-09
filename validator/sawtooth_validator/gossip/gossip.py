@@ -653,7 +653,13 @@ class ConnectionManager(InstrumentedThread):
             with self._gossip._lock:
                 self._refresh_peer_list()
                 peers = self._gossip._peers.copy()
-        peer_count = len(peers)
+
+            peer_count = len(peers)
+
+            self._reset_candidate_peer_endpoints()
+            self._refresh_connection_states()
+            self._check_temp_connections()
+
         if peer_count < self._min_peers:
             LOGGER.debug(
                 "Number of peers (%s) below "
@@ -661,11 +667,6 @@ class ConnectionManager(InstrumentedThread):
                 "Doing topology search.",
                 peer_count,
                 self._min_peers)
-
-            with self._lock:
-                self._reset_candidate_peer_endpoints()
-                self._refresh_connection_states()
-                self._check_temp_connections()
 
             self._get_peers_of_peers(peers)
             self._get_peers_of_endpoints()
@@ -875,7 +876,7 @@ class ConnectionManager(InstrumentedThread):
 
             LOGGER.debug("Endpoint has not completed authorization in "
                          "%s seconds: %s, Status: %s",
-                         connection_info.retry_threshold,
+                         time.time() - connection_info.time,
                          endpoint,
                          connection_info.status)
 
