@@ -556,9 +556,6 @@ class ConnectionManager(InstrumentedThread):
         self._temp_connections = {}
         self._static_peer_status = {}
 
-        # force reboots
-    _exit = None
-
     def start(self):
         endpoints = set(self._initial_peer_endpoints) - set([self._endpoint])
         for endpoint in endpoints:
@@ -571,23 +568,9 @@ class ConnectionManager(InstrumentedThread):
 
         super().start()
 
-    # With the current values, The follwing loop takes at least one second per loop
-    # and  this many steps to trigger a reboot. Adjust accordingly.
-    __TICKS_BEFORE_REBOOT__ = 300
-
     def run(self):
         has_chain_head = self._current_chain_head_func() is not None
-
-        the_reckoning = self.__TICKS_BEFORE_REBOOT__
         while not self._stopped:
-
-            the_reckoning -= 1
-            if the_reckoning < 0:
-                peer_count = len(self._gossip.get_peers())
-                if peer_count < self._min_peers:
-                    LOGGER.info("Exiting due to insufficient peers")
-                    self._exit.set()
-
             try:
                 if self._peering_mode == 'dynamic':
                     self.retry_dynamic_peering()
