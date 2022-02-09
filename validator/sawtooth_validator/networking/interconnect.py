@@ -1147,11 +1147,11 @@ class Interconnect:
         if err != _STARTUP_COMPLETE_SENTINEL:
             raise err
 
-    def stop(self, wait=True):
+    def stop(self):
         self._send_receive_thread.shutdown()
         for conn in self.outbound_connections.values():
             conn.stop()
-        self._future_callback_threadpool.shutdown(wait=wait)
+        self._future_callback_threadpool.shutdown(wait=True)
 
     def get_connection_id_by_endpoint(self, endpoint):
         """Returns the connection id associated with a publically
