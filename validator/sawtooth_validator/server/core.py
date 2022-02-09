@@ -481,23 +481,23 @@ class Validator:
                 raise self.RebootException()
             signal_event.wait(timeout=20)
 
-    def stop(self, wait=True):
+    def stop(self):
         self._gossip.stop()
         self._component_dispatcher.stop()
         self._network_dispatcher.stop()
-        self._network_service.stop(wait=wait)
+        self._network_service.stop()
 
-        self._component_service.stop(wait=wait)
+        self._component_service.stop()
 
-        self._consensus_service.stop(wait=wait)
+        self._consensus_service.stop()
         self._consensus_dispatcher.stop()
 
-        self._network_thread_pool.shutdown(wait=wait)
-        self._component_thread_pool.shutdown(wait=wait)
-        self._client_thread_pool.shutdown(wait=wait)
-        self._sig_pool.shutdown(wait=wait)
+        self._network_thread_pool.shutdown(wait=True)
+        self._component_thread_pool.shutdown(wait=True)
+        self._client_thread_pool.shutdown(wait=True)
+        self._sig_pool.shutdown(wait=True)
 
-        self._transaction_executor.stop(wait=wait)
+        self._transaction_executor.stop()
         self._context_manager.stop()
 
         self._block_publisher.stop()
