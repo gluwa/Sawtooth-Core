@@ -448,7 +448,10 @@ class _HandlerManager:
 
     def execute(self, connection_id, message, callback):
         def wrapped(connection_id, message):
-            return callback(self._handler.handle(connection_id, message))
+            LOGGER.error("executing %s", type(self._handler))
+            ret = self._handler.handle(connection_id, message)
+            LOGGER.error("finished %s", type(self._handler))
+            return callback(ret)
 
         return self._executor.submit(wrapped, connection_id, message)
 
