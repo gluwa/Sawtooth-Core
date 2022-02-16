@@ -92,6 +92,7 @@ class BlockResponderHandler(Handler):
         self._log_guard = _LogGuard()
 
     def handle(self, connection_id, message_content):
+        LOGGER.error("BlockResponderHandler.handle CP1")
         block_request_message = network_pb2.GossipBlockRequest()
         block_request_message.ParseFromString(message_content)
         if block_request_message.nonce in self._seen_requests:
@@ -101,8 +102,10 @@ class BlockResponderHandler(Handler):
             return HandlerResult(HandlerStatus.DROP)
 
         block_id = block_request_message.block_id
+        # completer locks
         block = self._responder.check_for_block(block_id)
         if block is None:
+            LOGGER.error("BlockResponderHandler.handle CP2")
             # No block found, broadcast original message to other peers
             # and add to pending requests
             if block_id == "HEAD":
@@ -111,10 +114,16 @@ class BlockResponderHandler(Handler):
                                  "block requests")
                     self._log_guard.chain_head_not_yet_set = True
             else:
+                # responder lock
+                LOGGER.error("BlockResponderHandler.handle CP4")
                 if not self._responder.already_requested(block_id):
+
+                    LOGGER.error("BlockResponderHandler.handle CP5")
                     if block_request_message.time_to_live > 0:
                         time_to_live = block_request_message.time_to_live
                         block_request_message.time_to_live = time_to_live - 1
+                        # gossip lock
+                        LOGGER.error("BlockResponderHandler.handle CP6")
                         self._gossip.broadcast(
                             block_request_message,
                             validator_pb2.Message.GOSSIP_BLOCK_REQUEST,
@@ -123,6 +132,7 @@ class BlockResponderHandler(Handler):
                         self._seen_requests[block_request_message.nonce] = \
                             block_request_message.block_id
 
+                        # lock
                         self._responder.add_request(block_id, connection_id)
                 else:
                     LOGGER.debug("Block %s has already been requested",
@@ -130,6 +140,8 @@ class BlockResponderHandler(Handler):
 
                     self._responder.add_request(block_id, connection_id)
         else:
+            LOGGER.error("BlockResponderHandler.handle CP3")
+
             LOGGER.debug("Responding to block requests: %s",
                          block.header_signature)
 
@@ -140,6 +152,7 @@ class BlockResponderHandler(Handler):
                               block_response.SerializeToString(),
                               connection_id)
 
+        LOGGER.error("BlockResponderHandler.handle CP7")
         return HandlerResult(HandlerStatus.PASS)
 
 
