@@ -951,6 +951,7 @@ impl Iterator for GetBlockIterator {
         }
 
         let block_id = &self.block_ids[self.index];
+        error!("wait state");
         let block: Option<Block> = match self
             .state
             .get_block_from_main_cache_or_blockstore_name(&block_id)
@@ -964,6 +965,8 @@ impl Iterator for GetBlockIterator {
 
             BlockLocation::Unknown => None,
         };
+
+        error!("letgo state");
 
         self.index += 1;
 
