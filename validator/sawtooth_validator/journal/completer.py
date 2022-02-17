@@ -136,6 +136,7 @@ class Completer:
             "Request missing predecessor: %s",
             blkw.previous_block_id)
         self._requested[blkw.previous_block_id] = None
+        # todo
         self._gossip.broadcast_block_request(blkw.previous_block_id)
         return None
 
@@ -211,6 +212,7 @@ class Completer:
             if block.header_signature in self._requested:
                 del self._requested[block.header_signature]
 
+            # check blockmanager
             return self._put_or_request_if_missing_predecessor(block)
 
         batch_id_list = [x.header_signature for x in block.batches]
@@ -328,6 +330,7 @@ class Completer:
             blkw = BlockWrapper(block)
             block = self._complete_block(blkw)
             if block is not None:
+                # sent to chain controller
                 self._send_block(block.block)
                 self._process_incomplete_blocks(block.header_signature)
             self._incomplete_blocks_length.set_value(
@@ -360,15 +363,20 @@ class Completer:
         Returns:
             BlockWrapper: The head of the chain.
         """
+        # lock here
         with self.lock:
             return self._get_chain_head()
 
     def get_block(self, block_id):
+        # lock here
         with self.lock:
+            LOGGER.error("acq")
             try:
-                return next(self._block_manager.get([block_id]))
+                block = next(self._block_manager.get([block_id]))
             except StopIteration:
-                return None
+                block = None
+        LOGGER.error("rel")
+        return block
 
     def get_batch(self, batch_id):
         with self.lock:
