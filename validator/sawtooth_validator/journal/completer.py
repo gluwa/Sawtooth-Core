@@ -26,6 +26,7 @@ from sawtooth_validator.networking.dispatch import Handler
 from sawtooth_validator.networking.dispatch import HandlerResult
 from sawtooth_validator.networking.dispatch import HandlerStatus
 from sawtooth_validator import metrics
+from sawtooth_validator.ilock import ILock
 
 LOGGER = logging.getLogger(__name__)
 COLLECTOR = metrics.get_collector(__name__)
@@ -92,7 +93,7 @@ class Completer:
         self._get_chain_head = None
         self._on_block_received = None
         self._on_batch_received = None
-        self.lock = RLock()
+        self.lock = ILock('completer', RLock)
 
         # Tracks how many times an unsatisfied dependency is found
         self._unsatisfied_dependency_count = COLLECTOR.counter(
@@ -326,7 +327,7 @@ class Completer:
         self._on_batch_received = on_batch_received_func
 
     def add_block(self, block):
-        with self.lock:
+        with self.lock('add_block'):
             blkw = BlockWrapper(block)
             block = self._complete_block(blkw)
             if block is not None:
@@ -337,7 +338,7 @@ class Completer:
                 len(self._incomplete_blocks))
 
     def add_batch(self, batch):
-        with self.lock:
+        with self.lock('add_batch'):
             if batch.header_signature in self._batch_cache:
                 return
             if self._complete_batch(batch):
@@ -364,22 +365,20 @@ class Completer:
             BlockWrapper: The head of the chain.
         """
         # lock here
-        with self.lock:
+        with self.lock('get_chain_head'):
             return self._get_chain_head()
 
     def get_block(self, block_id):
         # lock here
-        with self.lock:
-            LOGGER.error("acq")
+        with self.lock('get_block'):
             try:
                 block = next(self._block_manager.get([block_id]))
             except StopIteration:
                 block = None
-        LOGGER.error("rel")
         return block
 
     def get_batch(self, batch_id):
-        with self.lock:
+        with self.lock('get_batch'):
             if batch_id in self._batch_cache:
                 return self._batch_cache[batch_id]
 
@@ -389,7 +388,7 @@ class Completer:
                 return None
 
     def get_batch_by_transaction(self, transaction_id):
-        with self.lock:
+        with self.lock('get_batch_by_transaction'):
             if transaction_id in self._seen_txns:
                 batch_id = self._seen_txns[transaction_id]
                 return self.get_batch(batch_id)
