@@ -112,15 +112,19 @@ class Completer:
         self._incomplete_batches_length.set_value(0)
 
     def _put_or_request_if_missing_predecessor(self, blkw):
+        LOGGER.error("_put_or_request_if_missing_predecessor CP1")
         try:
             # Create Ref-B
             self._block_manager.put([blkw.block])
-            return blkw
         except MissingPredecessor:
             # The predecessor dropped out of the block manager between when we
             # checked if it was there and when the block was determined to be
             # complete.
+            LOGGER.error("_put_or_request_if_missing_predecessor CP2")
             return self._request_previous_if_not_already_requested(blkw)
+        else:
+            LOGGER.error("_put_or_request_if_missing_predecessor CP3")
+            return blkw
 
     def _request_previous_if_not_already_requested(self, blkw):
         if blkw.previous_block_id not in self._incomplete_blocks:
@@ -162,13 +166,20 @@ class Completer:
 
         """
 
-        if block.header_signature in self._block_manager:
+        LOGGER.error("complete_block CP1")
+        check1 = block.header_signature in self._block_manager
+        LOGGER.error("complete_block CP2")
+
+        if check1:
             LOGGER.debug("Drop duplicate block: %s", block)
             return None
 
         # NOTE: We cannot assume that if the previous block _is_ in the block
         # manager, that it will still be in there when this block is complete.
-        if block.previous_block_id not in self._block_manager:
+        # check manager
+        check2 = block.previous_block_id not in self._block_manager
+        LOGGER.error("complete_block CP3")
+        if check2:
             return self._request_previous_if_not_already_requested(block)
 
         # Check for same number of batch_ids and batches
@@ -197,13 +208,19 @@ class Completer:
 
                     # We have already requested the batch, do not do so again
                     if batch_id in self._requested:
+                        LOGGER.error("complete_block CP4")
                         return None
                     self._requested[batch_id] = None
+                    # ? Unlikely, gossip not involved
                     self._gossip.broadcast_batch_by_batch_id_request(batch_id)
+                    LOGGER.error("complete_block CP5")
                     building = False
 
+            # exit or check _put_or_request_if_missing_predecessor
+            LOGGER.error("complete_block CP6")
             # The block cannot be completed.
             if not building:
+                LOGGER.error("complete_block CP7")
                 return None
 
             batches = self._finalize_batch_list(block, temp_batches)
@@ -330,10 +347,13 @@ class Completer:
         with self.lock('add_block'):
             blkw = BlockWrapper(block)
             block = self._complete_block(blkw)
+            LOGGER.error("completed block %s", block)
             if block is not None:
                 # sent to chain controller
                 self._send_block(block.block)
+                LOGGER.error("sent block")
                 self._process_incomplete_blocks(block.header_signature)
+                LOGGER.error("processed incomplete blocks")
             self._incomplete_blocks_length.set_value(
                 len(self._incomplete_blocks))
 
