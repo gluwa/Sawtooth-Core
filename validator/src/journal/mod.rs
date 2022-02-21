@@ -35,6 +35,7 @@ mod chain_id_manager;
 mod commit_store;
 pub mod commit_store_ffi;
 mod fork_cache;
+pub mod ilock;
 pub mod incoming_batch_queue_ffi;
 pub mod publisher;
 pub mod publisher_ffi;

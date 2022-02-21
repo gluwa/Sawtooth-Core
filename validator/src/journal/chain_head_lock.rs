@@ -1,7 +1,7 @@
 use crate::batch::Batch;
 use crate::block::Block;
+use crate::journal::ilock::IRwLockWriteGuard as RwLockWriteGuard;
 use crate::journal::publisher::{BlockPublisherState, SyncBlockPublisher};
-use std::sync::RwLockWriteGuard;
 
 /// Abstracts acquiring the lock used by the BlockPublisher without exposing access to the
 /// publisher itself.
@@ -17,7 +17,11 @@ impl ChainHeadLock {
 
     pub fn acquire(&self) -> ChainHeadGuard {
         ChainHeadGuard {
-            state: self.publisher.state.write().expect("Lock is not poisoned"),
+            state: self
+                .publisher
+                .state
+                .write("acquire")
+                .expect("Lock is not poisoned"),
             publisher: self.publisher.clone(),
         }
     }

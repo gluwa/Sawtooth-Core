@@ -26,7 +26,7 @@ use std::mem;
 use std::slice::Iter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, SendError, Sender};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -37,6 +37,7 @@ use crate::journal::candidate_block::{CandidateBlock, CandidateBlockError};
 use crate::journal::chain_commit_state::TransactionCommitCache;
 use crate::journal::chain_head_lock::ChainHeadLock;
 use crate::journal::commit_store::CommitStore;
+use crate::journal::ilock::IRwLock as RwLock;
 use crate::metrics;
 use crate::state::settings_view::SettingsView;
 use crate::state::state_view_factory::StateViewFactory;
@@ -200,7 +201,7 @@ impl SyncBlockPublisher {
     ) {
         let mut state = self
             .state
-            .write()
+            .write("on_chain_updated_internal")
             .expect("RwLock was poisoned during a write lock");
         self.on_chain_updated(
             &mut state,
@@ -467,7 +468,10 @@ impl SyncBlockPublisher {
     }
 
     pub fn on_batch_received(&self, batch: Batch) {
-        let mut state = self.state.write().expect("Lock should not be poisoned");
+        let mut state = self
+            .state
+            .write("on_batch_received")
+            .expect("Lock should not be poisoned");
 
         // Batch can be added if the signer is authorized and the batch isn't already committed
         let permission_check = {
@@ -547,13 +551,16 @@ impl BlockPublisher {
         batch_observers: Vec<Box<dyn BatchObserver>>,
         batch_injector_factory: PyObject,
     ) -> Self {
-        let state = Arc::new(RwLock::new(BlockPublisherState::new(
-            transaction_executor,
-            batch_observers,
-            chain_head,
-            None,
-            PendingBatchesPool::new(NUM_PUBLISH_COUNT_SAMPLES, INITIAL_PUBLISH_COUNT),
-        )));
+        let state = Arc::new(RwLock::new(
+            "BlockPublisherState".into(),
+            BlockPublisherState::new(
+                transaction_executor,
+                batch_observers,
+                chain_head,
+                None,
+                PendingBatchesPool::new(NUM_PUBLISH_COUNT_SAMPLES, INITIAL_PUBLISH_COUNT),
+            ),
+        ));
 
         let publisher = SyncBlockPublisher {
             state,
@@ -603,7 +610,11 @@ impl BlockPublisher {
     }
 
     pub fn cancel_block(&self) -> Result<(), CancelBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock was poisoned");
+        let mut state = self
+            .publisher
+            .state
+            .write("cancel_block")
+            .expect("RwLock was poisoned");
         if state.candidate_block.is_some() {
             self.publisher.cancel_block(&mut state, true);
             Ok(())
@@ -621,7 +632,11 @@ impl BlockPublisher {
     }
 
     pub fn initialize_block(&self, previous_block: &Block) -> Result<(), InitializeBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock was poisoned");
+        let mut state = self
+            .publisher
+            .state
+            .write("initialize_block")
+            .expect("RwLock was poisoned");
         self.publisher
             .initialize_block(&mut state, previous_block, true)
     }
@@ -631,13 +646,21 @@ impl BlockPublisher {
         consensus_data: &[u8],
         force: bool,
     ) -> Result<String, FinalizeBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock is poisoned");
+        let mut state = self
+            .publisher
+            .state
+            .write("finalize_block")
+            .expect("RwLock is poisoned");
         self.publisher
             .finalize_block(&mut state, consensus_data, force)
     }
 
     pub fn summarize_block(&self, force: bool) -> Result<Vec<u8>, FinalizeBlockError> {
-        let mut state = self.publisher.state.write().expect("RwLock is poisoned");
+        let mut state = self
+            .publisher
+            .state
+            .write("summarize_block")
+            .expect("RwLock is poisoned");
         self.publisher.summarize_block(&mut state, force)
     }
 
@@ -645,7 +668,7 @@ impl BlockPublisher {
         let state = self
             .publisher
             .state
-            .read()
+            .read("pending_batch_info")
             .expect("RwLock was poisoned during a write lock");
         (
             state.pending_batches.len() as i32,
@@ -657,7 +680,7 @@ impl BlockPublisher {
         let state = self
             .publisher
             .state
-            .read()
+            .read("has_batch")
             .expect("RwLock was poisoned during a write lock");
         state.pending_batches.contains(batch_id)
     }
@@ -670,7 +693,7 @@ impl BlockPublisher {
 /// introduced by this must be filtered out later.
 pub fn make_batch_queue() -> (IncomingBatchSender, IncomingBatchReceiver) {
     let (sender, reciever) = channel();
-    let ids = Arc::new(RwLock::new(HashSet::new()));
+    let ids = Arc::new(RwLock::new("batch_ids".into(), HashSet::new()));
     (
         IncomingBatchSender::new(ids.clone(), sender),
         IncomingBatchReceiver::new(ids, reciever),
@@ -693,7 +716,7 @@ impl IncomingBatchReceiver {
     pub fn get(&mut self, timeout: Duration) -> Result<Batch, BatchQueueError> {
         let batch = self.receiver.recv_timeout(timeout)?;
         self.ids
-            .write()
+            .write("get")
             .expect("RwLock was poisoned during a write lock")
             .remove(&batch.header_signature);
         Ok(batch)
@@ -713,7 +736,7 @@ impl IncomingBatchSender {
     pub fn put(&mut self, batch: Batch) -> Result<(), BatchQueueError> {
         let mut ids = self
             .ids
-            .write()
+            .write("put")
             .expect("RwLock was poisoned during a write lock");
 
         if !ids.contains(&batch.header_signature) {
@@ -727,7 +750,7 @@ impl IncomingBatchSender {
     pub fn has_batch(&self, batch_id: &str) -> Result<bool, BatchQueueError> {
         Ok(self
             .ids
-            .read()
+            .read("has_batch")
             .expect("RwLock was poisoned during a write lock")
             .contains(batch_id))
     }

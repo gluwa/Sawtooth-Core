@@ -30,7 +30,6 @@ use std::sync::mpsc::RecvError;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 
@@ -49,6 +48,7 @@ use crate::journal::block_wrapper::BlockStatus;
 use crate::journal::chain_head_lock::ChainHeadLock;
 use crate::journal::chain_id_manager::ChainIdManager;
 use crate::journal::fork_cache::ForkCache;
+use crate::journal::ilock::IRwLock as RwLock;
 use crate::metrics;
 use crate::proto::transaction_receipt::TransactionReceipt;
 use crate::scheduler::TxnExecutionResult;
@@ -309,16 +309,19 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         fork_cache_keep_time: Duration,
     ) -> Self {
         let mut chain_controller = ChainController {
-            state: Arc::new(RwLock::new(ChainControllerState {
-                block_manager,
-                block_references: HashMap::new(),
-                chain_reader,
-                chain_id_manager: ChainIdManager::new(data_dir),
-                observers,
-                chain_head: None,
-                state_pruning_manager,
-                fork_cache: ForkCache::new(fork_cache_keep_time),
-            })),
+            state: Arc::new(RwLock::new(
+                "ChainControllerState".into(),
+                ChainControllerState {
+                    block_manager,
+                    block_references: HashMap::new(),
+                    chain_reader,
+                    chain_id_manager: ChainIdManager::new(data_dir),
+                    observers,
+                    chain_head: None,
+                    state_pruning_manager,
+                    fork_cache: ForkCache::new(fork_cache_keep_time),
+                },
+            )),
             block_validator,
             block_validation_results,
             stop_handle: Arc::new(Mutex::new(None)),
@@ -346,7 +349,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
     pub fn chain_head(&self) -> Option<Block> {
         let state = self
             .state
-            .read()
+            .read("chain_head")
             .expect("No lock holder should have poisoned the lock");
 
         if let Some(head) = &state.chain_head {
@@ -375,7 +378,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
             .or_else(|| {
                 if self
                     .state
-                    .read()
+                    .read("block_validation_result")
                     .expect("Unable to acquire read lock, due to poisoning")
                     .chain_reader
                     .get_block_by_block_id(block_id)
@@ -468,7 +471,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         {
             let mut state = self
                 .state
-                .write()
+                .write("on_block_received")
                 .expect("No lock holder should have poisoned the lock");
 
             if state.chain_head.is_none() {
@@ -489,7 +492,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         let block = {
             let mut state = self
                 .state
-                .write()
+                .write("on_block_received")
                 .expect("No lock holder should have poisoned the lock");
 
             if let Some(Some(block)) = state.block_manager.get(&[&block_id]).next() {
@@ -523,7 +526,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         if let Some(block) = block {
             let mut state = self
                 .state
-                .write()
+                .write("on_block_received")
                 .expect("No lock holder should have poisoned the lock");
 
             // Transfer Ref-B: Implicitly transfer ownership of the external reference placed on
@@ -590,7 +593,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
     pub fn ignore_block(&self, block: &Block) {
         let mut state = self
             .state
-            .write()
+            .write("ignore_block")
             .expect("No lock holder should have poisoned the lock");
 
         // Drop Ref-C: Consensus is not interested in this block anymore
@@ -632,7 +635,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
     pub fn forks(&self, head: &str) -> Option<Vec<Block>> {
         let state = self
             .state
-            .read()
+            .read("forks")
             .expect("No lock holder should have poisoned the lock");
 
         match state.block_manager.ref_block(head) {
@@ -673,7 +676,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
     fn get_block(&self, block_id: &str) -> Option<Block> {
         let state = self
             .state
-            .read()
+            .read("get_block")
             .expect("No lock holder should have poisoned the lock");
 
         state.block_manager.get(&[block_id]).next().unwrap_or(None)
@@ -712,7 +715,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
 
                 let mut state = self
                     .state
-                    .write()
+                    .write("on_block_validated")
                     .expect("No lock holder should have poisoned the lock");
 
                 // Drop Ref-C: The block has been found to be invalid, and we are no longer
@@ -750,7 +753,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
             // only hold this lock as long as the loop is active.
             let mut state = self
                 .state
-                .write()
+                .write("handle_block_commit")
                 .expect("No lock holder should have poisoned the lock");
 
             loop {
@@ -986,7 +989,7 @@ impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 
         // before this controller was started
         let mut state = self
             .state
-            .write()
+            .write("initialize_chain_head")
             .expect("No lock holder should have poisoned the lock");
 
         let chain_head = state
