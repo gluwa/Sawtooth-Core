@@ -1,4 +1,5 @@
 use log::error;
+use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::sync::PoisonError;
 use std::sync::RwLock;
@@ -89,6 +90,7 @@ impl<T> IRwLock<T> {
         place: &str,
     ) -> Result<IRwLockReadGuard<T>, PoisonError<RwLockReadGuard<T>>> {
         error!("θ;{};Wait;{};{};{}", self.name, 'R', self.thread(), place);
+        std::io::stdout().flush().unwrap();
         let inner = self.inner.read()?;
         error!("θ;{};Acq;{};{};{}", self.name, 'R', self.thread(), place);
         Ok(IRwLockReadGuard {
@@ -103,7 +105,7 @@ impl<T> IRwLock<T> {
         place: &str,
     ) -> Result<IRwLockWriteGuard<T>, PoisonError<RwLockWriteGuard<T>>> {
         error!("θ;{};Wait;{};{};{}", self.name, 'W', self.thread(), place);
-        //newtype guard
+        std::io::stdout().flush().unwrap();
         let inner = self.inner.write()?;
         error!("θ;{};Acq;{};{};{}", self.name, 'W', self.thread(), place);
         Ok(IRwLockWriteGuard {

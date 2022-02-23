@@ -152,9 +152,9 @@ enum BlockLocation {
 }
 
 #[derive(Default)]
+/// Lock acq order, references ->  block_id index -> blockstore
 struct BlockManagerState {
     block_by_block_id: RwLock<HashMap<String, Block>>,
-
     blockstore_by_name: RwLock<HashMap<String, Box<dyn IndexedBlockStore>>>,
 
     references_by_block_id: RwLock<HashMap<String, RefCount>>,
