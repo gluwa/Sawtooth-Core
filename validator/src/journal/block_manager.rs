@@ -666,37 +666,43 @@ impl BlockManager {
             .persist_lock
             .read("contains_any_batches")
             .expect("The persist RwLock is poisoned");
-        //blockstore held while acq W ref_by_block_id
-        let blockstore_by_name = self
-            .state
-            .blockstore_by_name
-            .read("contains_any_batches")
-            .expect("The blockstore RwLock is poisoned");
-        if let Some(store) = self.persisted_branch_contains_block(&blockstore_by_name, block_id)? {
-            self.persisted_branch_contains_any_batches(store, block_id, ids)
-        } else {
-            if block_id != NULL_BLOCK_IDENTIFIER {
-                // new branch iterator acquires ref_by_block_id lock on new
-                //next will acquire block_by_block_id R and blockstores as R
-                for pool_block in self.branch(block_id)? {
-                    if let Some(store) = self.persisted_branch_contains_block(
-                        &blockstore_by_name,
-                        &pool_block.header_signature,
-                    )? {
-                        return self.persisted_branch_contains_any_batches(
-                            store,
-                            &pool_block.header_signature,
-                            ids,
-                        );
-                    }
+        {
+            let blockstore_by_name = self
+                .state
+                .blockstore_by_name
+                .read("contains_any_batches")
+                .expect("The blockstore RwLock is poisoned");
 
-                    if let Some(batch_id) = self.block_contains_any_batch(&pool_block, ids) {
-                        return Ok(Some(batch_id));
-                    }
+            if let Some(store) =
+                self.persisted_branch_contains_block(&blockstore_by_name, block_id)?
+            {
+                return self.persisted_branch_contains_any_batches(store, block_id, ids);
+            }
+        }
+        if block_id != NULL_BLOCK_IDENTIFIER {
+            for pool_block in self.branch(block_id)? {
+                let blockstore_by_name = self
+                    .state
+                    .blockstore_by_name
+                    .read("contains_any_batches")
+                    .expect("The blockstore RwLock is poisoned");
+                if let Some(store) = self.persisted_branch_contains_block(
+                    &blockstore_by_name,
+                    &pool_block.header_signature,
+                )? {
+                    return self.persisted_branch_contains_any_batches(
+                        store,
+                        &pool_block.header_signature,
+                        ids,
+                    );
+                }
+
+                if let Some(batch_id) = self.block_contains_any_batch(&pool_block, ids) {
+                    return Ok(Some(batch_id));
                 }
             }
-            Ok(None)
         }
+        Ok(None)
     }
 
     fn block_contains_any_transaction(&self, block: &Block, ids: &[&String]) -> Option<String> {
