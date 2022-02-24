@@ -74,6 +74,8 @@ impl BlockRef {
 }
 
 impl Drop for BlockRef {
+    /// implicit lock_propagation; autocalled before dropping BlockRef
+    /// lock propagation; references -> block_id
     fn drop(&mut self) {
         // This will be the only place unref_block is called
         self.block_manager
@@ -156,7 +158,6 @@ enum BlockLocation {
 struct BlockManagerState {
     block_by_block_id: RwLock<HashMap<String, Block>>,
     blockstore_by_name: RwLock<HashMap<String, Box<dyn IndexedBlockStore>>>,
-
     references_by_block_id: RwLock<HashMap<String, RefCount>>,
 }
 
@@ -232,6 +233,7 @@ impl BlockManagerState {
         Ok(())
     }
 
+    /// Lock acq; references -> block_id -> blockstore
     fn put(&self, branch: Vec<Block>) -> Result<(), BlockManagerError> {
         let mut references_by_block_id = self
             .references_by_block_id
@@ -311,6 +313,7 @@ impl BlockManagerState {
         Ok(())
     }
 
+    /// lock acq: block_id:R -> blockstore:R
     fn get_block_from_main_cache_or_blockstore_name(&self, block_id: &str) -> BlockLocation {
         let block_by_block_id = self
             .block_by_block_id
@@ -334,6 +337,7 @@ impl BlockManagerState {
         }
     }
 
+    /// lock acq; blockstore:R
     fn get_block_from_blockstore(
         &self,
         block_id: &str,
@@ -351,6 +355,7 @@ impl BlockManagerState {
         Ok(block)
     }
 
+    /// lock acq; references:W -> blockstore:R
     fn ref_block(&self, block_id: &str) -> Result<(), BlockManagerError> {
         let mut references_by_block_id = self
             .references_by_block_id
@@ -392,6 +397,7 @@ impl BlockManagerState {
         Err(BlockManagerError::UnknownBlock)
     }
 
+    /// lock acq; references:W -> block_id:W
     fn unref_block(&self, tip: &str) -> Result<bool, BlockManagerError> {
         let mut references_by_block_id = self
             .references_by_block_id
@@ -494,6 +500,7 @@ impl BlockManagerState {
         (blocks_to_remove, pointed_to)
     }
 
+    /// lock acq; references -> blockstore
     fn add_store(
         &self,
         store_name: &str,
@@ -550,6 +557,8 @@ impl BlockManager {
     /// Note:
     /// transaction_index_contains requires the indexed blockstore under
     /// consideration to be exclusive with respect to writes.
+    ///
+    /// needs index mutex
     fn transaction_index_contains(
         &self,
         index: &dyn IndexedBlockStore,
@@ -574,6 +583,7 @@ impl BlockManager {
     /// Note:
     /// transaction_index_contains requires the indexed blockstore under
     /// consideration to be exclusive with respect to writes.
+    /// needs index mutex
     fn batch_index_contains(
         &self,
         index: &dyn IndexedBlockStore,
@@ -591,6 +601,10 @@ impl BlockManager {
         }
     }
 
+    ///lock acq; persist:R -> blockstore:R
+    /// lock propagation; block_id -> blockstore, references -> blockstore
+    /// lock conflict; holds blockstore while propagating; {references:W -> blockstore:R}, {block_id:R -> blockstore:R}
+    /// checkpoint TODO
     pub fn contains_any_transactions(
         &self,
         block_id: &str,
@@ -600,38 +614,49 @@ impl BlockManager {
             .persist_lock
             .read("constains_any_transactions")
             .expect("The persist RwLock is poisoned");
-        let blockstore_by_name = self
-            .state
-            .blockstore_by_name
-            .read("contains_any_transactions")
-            .expect("The blockstore RwLock is poisoned");
-        if let Some(store) = self.persisted_branch_contains_block(&blockstore_by_name, block_id)? {
-            self.persisted_branch_contains_any_transactions(store, block_id, ids)
-        } else {
-            if block_id != NULL_BLOCK_IDENTIFIER {
-                for pool_block in self.branch(block_id)? {
-                    if let Some(store) = self.persisted_branch_contains_block(
-                        &blockstore_by_name,
+        {
+            let blockstore_by_name = self
+                .state
+                .blockstore_by_name
+                .read("contains_any_transactions")
+                .expect("The blockstore RwLock is poisoned");
+            let store = self.persisted_branch_contains_block(&blockstore_by_name, block_id)?;
+
+            if let Some(store) = store {
+                return self.persisted_branch_contains_any_transactions(store, block_id, ids);
+            }
+            //drop store guard
+        };
+        if block_id != NULL_BLOCK_IDENTIFIER {
+            for pool_block in self.branch(block_id)? {
+                let blockstore_by_name = self
+                    .state
+                    .blockstore_by_name
+                    .read("contains_any_transactions")
+                    .expect("The blockstore RwLock is poisoned");
+
+                if let Some(store) = self.persisted_branch_contains_block(
+                    &blockstore_by_name,
+                    &pool_block.header_signature,
+                )? {
+                    return self.persisted_branch_contains_any_transactions(
+                        store,
                         &pool_block.header_signature,
-                    )? {
-                        return self.persisted_branch_contains_any_transactions(
-                            store,
-                            &pool_block.header_signature,
-                            ids,
-                        );
-                    }
-                    if let Some(transaction_id) =
-                        self.block_contains_any_transaction(&pool_block, ids)
-                    {
-                        return Ok(Some(transaction_id));
-                    }
+                        ids,
+                    );
+                }
+                if let Some(transaction_id) = self.block_contains_any_transaction(&pool_block, ids)
+                {
+                    return Ok(Some(transaction_id));
                 }
             }
-
-            Ok(None)
         }
+
+        Ok(None)
     }
 
+    /// lock acq; persist -> blockstore
+    /// TODO will contain more locks on next iteration
     pub fn contains_any_batches(
         &self,
         block_id: &str,
@@ -641,6 +666,7 @@ impl BlockManager {
             .persist_lock
             .read("contains_any_batches")
             .expect("The persist RwLock is poisoned");
+        //blockstore held while acq W ref_by_block_id
         let blockstore_by_name = self
             .state
             .blockstore_by_name
@@ -650,6 +676,8 @@ impl BlockManager {
             self.persisted_branch_contains_any_batches(store, block_id, ids)
         } else {
             if block_id != NULL_BLOCK_IDENTIFIER {
+                // new branch iterator acquires ref_by_block_id lock on new
+                //next will acquire block_by_block_id R and blockstores as R
                 for pool_block in self.branch(block_id)? {
                     if let Some(store) = self.persisted_branch_contains_block(
                         &blockstore_by_name,
@@ -716,6 +744,7 @@ impl BlockManager {
         }
     }
 
+    /// needs transaction index mutex
     fn persisted_branch_contains_any_transactions(
         &self,
         store: &dyn IndexedBlockStore,
@@ -730,6 +759,7 @@ impl BlockManager {
         Ok(None)
     }
 
+    /// needs batch index mutex
     fn persisted_branch_contains_any_batches(
         &self,
         store: &dyn IndexedBlockStore,
@@ -745,6 +775,7 @@ impl BlockManager {
         Ok(None)
     }
 
+    /// lock acq; references -> blockstore
     pub fn contains(&self, block_id: &str) -> Result<bool, BlockManagerError> {
         let references_by_block_id = self
             .state
@@ -769,14 +800,18 @@ impl BlockManager {
     ///       does not have its predecessor as the block to its left in
     ///       branch, an error is returned.
     ///     - If branch is empty, an error is returned
+    ///
+    /// lock req: references -> block_id -> blockstore
     pub fn put(&self, branch: Vec<Block>) -> Result<(), BlockManagerError> {
         self.state.put(branch)
     }
 
+    /// implicit requirement on iter?
     pub fn get(&self, block_ids: &[&str]) -> Box<dyn Iterator<Item = Option<Block>>> {
         Box::new(GetBlockIterator::new(Arc::clone(&self.state), block_ids))
     }
 
+    /// lock req; blockstore
     pub fn get_from_blockstore(
         &self,
         block_id: &str,
@@ -785,6 +820,9 @@ impl BlockManager {
         self.state.get_block_from_blockstore(block_id, store_name)
     }
 
+    ///implicit propagation on iter; (in Op) (next) block_id:R -> blockstore:R
+    ///
+    /// lock propagation references:W -> blockstore:R
     pub fn branch(&self, tip: &str) -> Result<Box<dyn Iterator<Item = Block>>, BlockManagerError> {
         Ok(Box::new(BranchIterator::new(
             Arc::clone(&self.state),
@@ -812,6 +850,8 @@ impl BlockManager {
     /// Starting at a tip block, if the tip block's ref-count drops to 0,
     /// remove all blocks until a ref-count of 1 is found.
     /// NOTE: this method will be made private; it will only be called when a `BlockRef` is dropped
+    ///
+    /// lock propagation: references -> block_id
     pub fn unref_block(&self, tip: &str) -> Result<bool, BlockManagerError> {
         self.state.unref_block(tip)
     }
@@ -824,6 +864,7 @@ impl BlockManager {
         self.state.add_store(store_name, store)
     }
 
+    /// lock acq; blockstore;
     #[allow(clippy::needless_pass_by_value)]
     fn remove_blocks_from_blockstore(
         &self,
@@ -860,6 +901,7 @@ impl BlockManager {
         Ok(())
     }
 
+    /// lock acq; blockstore
     fn insert_blocks_in_blockstore(
         &self,
         to_be_inserted: Vec<Block>,
@@ -887,6 +929,7 @@ impl BlockManager {
         Ok(())
     }
 
+    ///lock acq; persist -> {blockstore; blockstore; block_id; block_id}
     pub fn persist(&self, head: &str, store_name: &str) -> Result<(), BlockManagerError> {
         let _lock = self
             .persist_lock
@@ -996,7 +1039,9 @@ pub struct BranchIterator {
     blockstore: Option<String>,
 }
 
+///lock propagation (in) Op; next(..) block_id -> blockstore)
 impl BranchIterator {
+    ///lock propagation; references:W -> blockstore:R
     fn new(
         state: Arc<BlockManagerState>,
         first_block_id: String,
@@ -1022,6 +1067,7 @@ impl BranchIterator {
     }
 }
 
+/// lock propagation; references -> block_id
 impl Drop for BranchIterator {
     fn drop(&mut self) {
         if self.initial_block_id != NULL_BLOCK_IDENTIFIER {
@@ -1038,9 +1084,12 @@ impl Drop for BranchIterator {
     }
 }
 
+/// lock propagation; block_id -> blockstore (next(..))
 impl Iterator for BranchIterator {
     type Item = Block;
 
+    /// lock propagation; block_id:R -> blockstore:R
+    /// implicit on Iterator
     fn next(&mut self) -> Option<Self::Item> {
         if self.next_block_id == NULL_BLOCK_IDENTIFIER {
             None
@@ -1090,7 +1139,10 @@ pub struct BranchDiffIterator {
     has_reached_common_ancestor: bool,
 }
 
+///lock propagation (in) Op; next(..) block_id -> blockstore)
 impl BranchDiffIterator {
+    /// implicit lock req on iterator;
+    /// lock propagation; references -> blockstore
     fn new(
         state: Arc<BlockManagerState>,
         tip: &str,
@@ -1127,6 +1179,8 @@ impl BranchDiffIterator {
 impl Iterator for BranchDiffIterator {
     type Item = Block;
 
+    ///implicit lock propagation on BranchIterator::next;
+    /// lock propagation; block_id -> blockstore
     fn next(&mut self) -> Option<Self::Item> {
         if self.has_reached_common_ancestor {
             None
