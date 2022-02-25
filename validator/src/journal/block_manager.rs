@@ -178,6 +178,7 @@ impl BlockManagerState {
         blockstore_by_name: &HashMap<String, Box<dyn IndexedBlockStore>>,
         block_id: &str,
     ) -> Result<bool, BlockManagerError> {
+        //null block is expected to not be reffed;
         let block_is_null_block = block_id == NULL_BLOCK_IDENTIFIER;
         if block_is_null_block {
             return Ok(true);
@@ -408,25 +409,40 @@ impl BlockManagerState {
             self.lower_tip_blocks_refcount(&mut references_by_block_id, tip)?;
 
         let mut blocks_to_remove = vec![];
-
         let mut optional_new_tip = None;
 
         let dropped = if external_ref_count == 0 && internal_ref_count == 0 {
+            //tip to be removed
             error!("unref_block CP1");
-            if let Some(block_id) = block_id {
-                let (mut predecesors_to_remove, new_tip) = self
+            if let Some(tip) = block_id {
+                //new tip can't be old tip, old tip is removed asap
+                // tip will be in the predecessors to remove.
+                let (references_to_remove, new_tip) = self
                     .find_block_ids_for_blocks_with_refcount_1_or_less(
                         &references_by_block_id,
-                        &block_id,
+                        &tip,
                     );
-                blocks_to_remove.append(&mut predecesors_to_remove);
+
+                //remove
+                debug_assert!(Some(tip.to_string()) != new_tip);
+
+                blocks_to_remove = references_to_remove;
                 debug!("Removing block 1 {}", tip);
+                /*
+
+                {
+                    //scheduled for deletion if tip already in blocks_to_remove
                 self.block_by_block_id
                     .write("unref_block")
                     .expect("Acquiring block pool write lock; lock poisoned")
                     .remove(tip);
                 references_by_block_id.remove(tip);
+                }
+                 */
                 optional_new_tip = new_tip;
+            } else {
+                error!("empty block_id in RefCount for {}", tip);
+                unreachable!();
             }
             true
         } else {
@@ -439,14 +455,18 @@ impl BlockManagerState {
             .counter("BlockManager.expired", None, None)
             .inc_n(blocks_to_remove.len());
 
-        blocks_to_remove.iter().for_each(|block_id| {
-            debug!("Removing block 2 {}", block_id);
-            self.block_by_block_id
+        if !blocks_to_remove.is_empty() {
+            let mut block_by_block_id = self
+                .block_by_block_id
                 .write("unref_block")
-                .expect("Acquiring block pool write lock; lock poisoned")
-                .remove(block_id);
-            references_by_block_id.remove(block_id);
-        });
+                .expect("Acquiring block pool write lock; lock poisoned");
+
+            for ref block_id in blocks_to_remove {
+                debug!("Removing block 2 {}", block_id);
+                block_by_block_id.remove(block_id);
+                references_by_block_id.remove(block_id);
+            }
+        }
 
         error!("unref_block CP3");
 
@@ -460,14 +480,16 @@ impl BlockManagerState {
         Ok(dropped)
     }
 
+    /// tip parameter must be the same as block_id retrieved from references_by_block_id
     fn lower_tip_blocks_refcount(
         &self,
         references_by_block_id: &mut HashMap<String, RefCount>,
         tip: &str,
     ) -> Result<(u64, u64, Option<String>), BlockManagerError> {
         match references_by_block_id.get_mut(tip) {
-            Some(ref mut ref_block) => {
+            Some(ref_block) => {
                 ref_block.decrease_external_ref_count();
+                debug_assert!(tip == ref_block.block_id.as_str());
                 Ok((
                     ref_block.external_ref_count,
                     ref_block.internal_ref_count,
@@ -480,6 +502,7 @@ impl BlockManagerState {
 
     /// Starting from some `tip` block_id, walk back until finding a block that has a
     /// internal ref_count >= 2 or an external_ref_count > 0.
+    /// goto 427
     fn find_block_ids_for_blocks_with_refcount_1_or_less(
         &self,
         references_by_block_id: &HashMap<String, RefCount>,
@@ -487,23 +510,25 @@ impl BlockManagerState {
     ) -> (Vec<String>, Option<String>) {
         let mut blocks_to_remove = vec![];
         let mut block_id = tip;
-        let pointed_to;
+        let mut pointed_to = None;
         loop {
-            if let Some(ref ref_block) = references_by_block_id.get(block_id) {
+            if let Some(ref_block) = references_by_block_id.get(block_id) {
                 if ref_block.internal_ref_count >= 2 || ref_block.external_ref_count >= 1 {
                     pointed_to = Some(block_id.into());
                     break;
-                } else if ref_block.previous_block_id == NULL_BLOCK_IDENTIFIER {
-                    blocks_to_remove.push(block_id.into());
-                    pointed_to = None;
-                    break;
-                } else {
-                    blocks_to_remove.push(block_id.into());
                 }
+                // tip can be pushed
+                blocks_to_remove.push(block_id.into());
+
+                //does null block ever gets refed, inserted?, inconclusive, evidence by elimination supports it doesn't
+                if ref_block.previous_block_id == NULL_BLOCK_IDENTIFIER {
+                    break;
+                }
+
                 block_id = &ref_block.previous_block_id;
             } else {
-                error!("block_id {} not found", block_id);
-                unreachable!();
+                warn!("missing RefCount {}", block_id);
+                break;
             }
         }
         (blocks_to_remove, pointed_to)
