@@ -233,7 +233,7 @@ impl BlockManagerState {
         Ok(())
     }
 
-    /// Lock acq; references -> block_id -> blockstore
+    /// Lock acq; references:W -> block_id:W -> blockstore:R
     fn put(&self, branch: Vec<Block>) -> Result<(), BlockManagerError> {
         let mut references_by_block_id = self
             .references_by_block_id
@@ -412,6 +412,7 @@ impl BlockManagerState {
         let mut optional_new_tip = None;
 
         let dropped = if external_ref_count == 0 && internal_ref_count == 0 {
+            error!("unref_block CP1");
             if let Some(block_id) = block_id {
                 let (mut predecesors_to_remove, new_tip) = self
                     .find_block_ids_for_blocks_with_refcount_1_or_less(
@@ -419,7 +420,7 @@ impl BlockManagerState {
                         &block_id,
                     );
                 blocks_to_remove.append(&mut predecesors_to_remove);
-                debug!("Removing block {}", tip);
+                debug!("Removing block 1 {}", tip);
                 self.block_by_block_id
                     .write("unref_block")
                     .expect("Acquiring block pool write lock; lock poisoned")
@@ -432,12 +433,14 @@ impl BlockManagerState {
             false
         };
 
+        error!("unref_block CP2");
+
         COLLECTOR
             .counter("BlockManager.expired", None, None)
             .inc_n(blocks_to_remove.len());
 
         blocks_to_remove.iter().for_each(|block_id| {
-            debug!("Removing block {}", block_id);
+            debug!("Removing block 2 {}", block_id);
             self.block_by_block_id
                 .write("unref_block")
                 .expect("Acquiring block pool write lock; lock poisoned")
@@ -445,12 +448,15 @@ impl BlockManagerState {
             references_by_block_id.remove(block_id);
         });
 
+        error!("unref_block CP3");
+
         if let Some(block_id) = optional_new_tip {
             if let Some(ref mut new_tip) = references_by_block_id.get_mut(block_id.as_str()) {
                 new_tip.decrease_internal_ref_count();
             };
         };
 
+        error!("unref_block CP4");
         Ok(dropped)
     }
 
@@ -495,6 +501,9 @@ impl BlockManagerState {
                     blocks_to_remove.push(block_id.into());
                 }
                 block_id = &ref_block.previous_block_id;
+            } else {
+                error!("block_id {} not found", block_id);
+                unreachable!();
             }
         }
         (blocks_to_remove, pointed_to)
@@ -812,7 +821,7 @@ impl BlockManager {
         self.state.put(branch)
     }
 
-    /// implicit requirement on iter?
+    /// lock propagation; block_id:R -> blockstore:R, blockstore:R
     pub fn get(&self, block_ids: &[&str]) -> Box<dyn Iterator<Item = Option<Block>>> {
         Box::new(GetBlockIterator::new(Arc::clone(&self.state), block_ids))
     }
@@ -848,6 +857,7 @@ impl BlockManager {
         )?))
     }
 
+    /// lock propagation; references:W -> blockstore:R
     pub fn ref_block(&self, tip: &str) -> Result<BlockRef, BlockManagerError> {
         self.state.ref_block(tip)?;
         Ok(BlockRef::new(tip.into(), self.clone()))
@@ -857,7 +867,7 @@ impl BlockManager {
     /// remove all blocks until a ref-count of 1 is found.
     /// NOTE: this method will be made private; it will only be called when a `BlockRef` is dropped
     ///
-    /// lock propagation: references -> block_id
+    /// lock propagation; references:W -> block_id:W
     pub fn unref_block(&self, tip: &str) -> Result<bool, BlockManagerError> {
         self.state.unref_block(tip)
     }
@@ -1009,6 +1019,8 @@ impl GetBlockIterator {
 impl Iterator for GetBlockIterator {
     type Item = Option<Block>;
 
+    /// lock propagation; block_id:R -> blockstore:R
+    /// lock acq; blockstore:R
     fn next(&mut self) -> Option<Self::Item> {
         if self.index >= self.block_ids.len() {
             return None;
