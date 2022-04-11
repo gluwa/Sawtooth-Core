@@ -64,7 +64,7 @@ jobs:
         docker run --rm -v $(pwd):/project/sawtooth-core bandit:$ISOLATION_ID run_bandit
 
     - name: Upload report from Bandit
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       if: failure()
       with:
         name: bandit.html
